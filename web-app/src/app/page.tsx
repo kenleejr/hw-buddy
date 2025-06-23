@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import TakePicture from "./components/TakePicture";
+import { GeminiLiveSession } from "./components/GeminiLiveSession";
 
 export default function Home() {
   const [sessionId, setSessionId] = useState("");
@@ -14,10 +14,16 @@ export default function Home() {
     }
   };
 
+  const handleEndSession = () => {
+    setIsSessionActive(false);
+    setSessionId("");
+  };
+
   if (isSessionActive) {
     return (
-      <TakePicture 
+      <GeminiLiveSession 
         sessionId={sessionId}
+        onEndSession={handleEndSession}
       />
     );
   }
