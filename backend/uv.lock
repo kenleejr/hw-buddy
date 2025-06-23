@@ -49,6 +49,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "firebase-admin" },
     { name = "google-adk" },
+    { name = "google-genai" },
     { name = "uvicorn" },
 ]
 
@@ -57,6 +58,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.13" },
     { name = "firebase-admin", specifier = ">=6.9.0" },
     { name = "google-adk", specifier = ">=1.4.2" },
+    { name = "google-genai", specifier = ">=1.21.1" },
     { name = "uvicorn", specifier = ">=0.34.3" },
 ]
 

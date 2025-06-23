@@ -115,7 +115,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       
       console.log('🎵 Connecting to Gemini Live API...');
       const session = await client.live.connect({
-        model: 'gemini-2.5-flash-preview-native-audio-dialog',
+        model: 'gemini-2.0-flash-live-001',
         callbacks: {
           onopen: () => {
             console.log('🎵 Session opened successfully!');
@@ -141,6 +141,8 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Orus' } },
           },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           tools: [{
             functionDeclarations: [{
               name: "take_picture",
@@ -153,7 +155,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           }],
           systemInstruction: {
             parts: [{
-              text: "You are a homework buddy assistant. When a user asks you anything, you should ALWAYS call the take_picture function to capture an image of their work before responding. This helps you see what they're working on so you can provide better assistance."
+              text: "You are a homework buddy assistant. When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. The function will return an image analysis that describes what's in the homework image. Use this image analysis to provide specific, helpful guidance about their homework. Reference the specific problems, text, or content you see in the image analysis when helping the student."
             }]
           }
         },
@@ -207,7 +209,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               setLastImageUrl(result.image_url);
             }
             
-            // Send function response back to Gemini
+            // Send function response back to Gemini with image analysis
             if (sessionRef.current) {
               sessionRef.current.sendToolResponse({
                 functionResponses: [{
@@ -217,11 +219,33 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                     result: {
                       success: result.success,
                       message: result.message,
-                      image_url: result.image_url || null
+                      image_url: result.image_url || null,
+                      image_gcs_url: result.image_gcs_url || null,
+                      image_analysis: result.image_description || null
                     }
                   }
                 }]
               });
+              
+              // Send the image analysis as text to Gemini Live
+              if (result.success && result.image_description) {
+                console.log('🎵 Sending image analysis to Gemini Live');
+                
+                try {
+                  sessionRef.current.sendClientContent({
+                    turns: [{
+                      role: 'user',
+                      parts: [{
+                        text: `Image Analysis: ${result.image_description}`
+                      }]
+                    }]
+                  });
+                  
+                  console.log('🎵 Image analysis sent to Gemini Live successfully');
+                } catch (error) {
+                  console.error('🎵 Error sending image analysis to Gemini Live:', error);
+                }
+              }
             }
             
           } catch (error) {
@@ -342,7 +366,19 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       setCurrentTranscript('');
     }
     
-    // Handle text content from assistant
+    // Handle input transcription (user speech)
+    if (message.serverContent?.inputTranscription?.text) {
+      console.log('🎵 Input transcription:', message.serverContent.inputTranscription.text);
+      setCurrentUserMessage(message.serverContent.inputTranscription.text);
+    }
+    
+    // Handle output transcription (assistant speech)
+    if (message.serverContent?.outputTranscription?.text) {
+      console.log('🎵 Output transcription:', message.serverContent.outputTranscription.text);
+      setCurrentAssistantMessage(prev => prev + message.serverContent.outputTranscription.text);
+    }
+    
+    // Handle text content from assistant (non-audio responses)
     const textContent = message.serverContent?.modelTurn?.parts?.find(part => part.text);
     if (textContent?.text) {
       setCurrentAssistantMessage(prev => prev + textContent.text);
@@ -413,19 +449,30 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           return;
         }
         
+        // Check if WebSocket is still open before sending data
+        const ws = (sessionRef.current as any)?.ws;
+        if (ws && ws.readyState !== WebSocket.OPEN) {
+          console.warn('🎵 WebSocket not open, skipping audio data');
+          return;
+        }
+        
         const { type, audioData, level, count } = event.data;
         
         if (type === 'audioData') {
           // Update audio level for UI
           setAudioLevel(level * 100); // Scale for better visualization
           
-          // Send all audio data to Gemini
-          const blob = createBlob(audioData);
-          sessionRef.current.sendRealtimeInput({ media: blob });
-          
-          // Only log occasionally when there's actual audio
-          if (count % 500 === 0 && level > 0.01) {
-            console.log('🎵 Audio level:', level.toFixed(4), 'sending to Gemini');
+          try {
+            // Send all audio data to Gemini
+            const blob = createBlob(audioData);
+            sessionRef.current.sendRealtimeInput({ media: blob });
+            
+            // Only log occasionally when there's actual audio
+            if (count % 500 === 0 && level > 0.01) {
+              console.log('🎵 Audio level:', level.toFixed(4), 'sending to Gemini');
+            }
+          } catch (error) {
+            console.error('🎵 Error sending audio to Gemini:', error);
           }
         }
       };

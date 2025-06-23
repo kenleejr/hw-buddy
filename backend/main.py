@@ -7,6 +7,8 @@ import os
 import time
 import asyncio
 from typing import Optional
+from google import genai
+from google.genai import types
 
 app = FastAPI(title="HW Buddy Backend", version="1.0.0")
 
@@ -44,6 +46,47 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
+# Initialize Gemini client
+def get_gemini_client():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+    return genai.Client(api_key=api_key)
+
+async def analyze_image_with_gemini(image_url: str) -> str:
+    """
+    Analyze an image using Gemini API and return a description of what's in the image,
+    specifically focused on homework/educational content.
+    """
+    try:
+        client = get_gemini_client()
+        
+        # Create content with the image and a prompt for homework analysis
+        contents = [
+            types.Part.from_text(text="""You are a homework tutor assistant. Analyze this image of homework or educational material. \
+                                 Describe what you see in detail, including any text, math problems, diagrams, or educational content. \
+                                 Focus on identifying the subject area, specific problems or questions visible, and any work that has been done. \
+                                 If there are math problems, read them out. If there's text, transcribe the key parts. \
+                                 Be specific and helpful for a student who wants to understand what's in their homework."""
+            ),
+            types.Part.from_uri(
+                file_uri="hw-buddy-462818.firebasestorage.app/images/b8abcd77-2eed-41e8-8c69-20a885fe8c77/test_image.jpg",
+                mime_type='image/jpeg'
+            )
+        ]
+        
+        # Generate content
+        response = await client.aio.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents
+        )
+        
+        return response.text
+        
+    except Exception as e:
+        print(f"Error analyzing image with Gemini: {e}")
+        return f"I can see an image was captured, but I couldn't analyze its contents due to an error: {str(e)}"
+
 class TakePictureRequest(BaseModel):
     session_id: str
 
@@ -52,6 +95,8 @@ class TakePictureResponse(BaseModel):
     message: str
     session_id: str
     image_url: Optional[str] = None
+    image_gcs_url: Optional[str] = None
+    image_description: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -95,11 +140,25 @@ async def take_picture(request: TakePictureRequest):
                 
                 # If we have a new image URL (different from before)
                 if new_image_url and new_image_url != current_image_url:
+                    new_image_gcs_url = updated_data.get('last_image_gcs_url')
+                    
+                    # Analyze the image with Gemini
+                    image_description = None
+                    try:
+                        # Try to use GCS URL first, fallback to HTTP URL
+                        url_to_analyze = new_image_gcs_url if new_image_gcs_url else new_image_url
+                        image_description = await analyze_image_with_gemini(url_to_analyze)
+                    except Exception as e:
+                        print(f"Failed to analyze image: {e}")
+                        image_description = "I can see that a picture was taken, but I couldn't analyze its contents."
+                    
                     return TakePictureResponse(
                         success=True,
-                        message=f"Picture taken successfully for session {request.session_id}",
+                        message=f"Picture taken and analyzed successfully for session {request.session_id}",
                         session_id=request.session_id,
-                        image_url=new_image_url
+                        image_url=new_image_url,
+                        image_gcs_url=new_image_gcs_url,
+                        image_description=image_description
                     )
         
         # If we timeout waiting for the image

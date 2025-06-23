@@ -44,6 +44,7 @@ class SessionModel extends ChangeNotifier {
       'status': 'ready',
       'command': 'none',
       'last_image_url': '',
+      'last_image_gcs_url': '',
     });
 
     _sessionSubscription = FirebaseFirestore.instance
@@ -86,17 +87,21 @@ class SessionModel extends ChangeNotifier {
       await controller.initialize();
       final image = await controller.takePicture();
 
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('images/$_sessionId/${DateTime.now().toIso8601String()}.jpg');
+      final fileName = 'images/$_sessionId/${DateTime.now().toIso8601String()}.jpg';
+      final storageRef = FirebaseStorage.instance.ref().child(fileName);
       await storageRef.putFile(File(image.path));
       final downloadURL = await storageRef.getDownloadURL();
+      
+      // Get the bucket name from Firebase Storage
+      final bucket = storageRef.bucket;
+      final gcsUrl = 'gs://$bucket/$fileName';
 
       await FirebaseFirestore.instance
           .collection('sessions')
           .doc(_sessionId)
           .update({
         'last_image_url': downloadURL,
+        'last_image_gcs_url': gcsUrl,
         'command': 'done',
       });
 
