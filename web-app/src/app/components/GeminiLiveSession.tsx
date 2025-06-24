@@ -25,6 +25,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const [lastImageUrl, setLastImageUrl] = useState<string | null>(null);
   const [currentUserMessage, setCurrentUserMessage] = useState('');
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   
   const sessionRef = useRef<Session | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -148,14 +149,24 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               name: "take_picture",
               description: "Take a picture using the homework buddy camera system",
               parameters: {
-                properties: {},
-                required: []
+                type: "object",
+                properties: {
+                  user_ask: {
+                    type: "string",
+                    description: "The user's specific question or request about their homework"
+                  }
+                },
+                required: ["user_ask"]
               }
             }]
           }],
           systemInstruction: {
             parts: [{
-              text: "You are a homework buddy assistant. When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. The function will return an image analysis that describes what's in the homework image. Use this image analysis to provide specific, helpful guidance about their homework. Reference the specific problems, text, or content you see in the image analysis when helping the student."
+              text: "You are a homework buddy assistant. \
+              When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. \
+              Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
+              The backend will analyze the image and provide next steps specifically tailored to the user's request. \
+              Simply relay the backend's response to the user, as it contains the detailed analysis and next steps."
             }]
           }
         },
@@ -184,16 +195,18 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       for (const functionCall of toolCall.functionCalls) {
         if (functionCall.name === 'take_picture') {
           console.log('🎵 Executing take_picture function...');
+          setIsAnalyzingImage(true);
           
           try {
-            // Call the backend API
+            // Call the backend API with user's ask
             const response = await fetch('http://localhost:8000/take_picture', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                session_id: sessionId
+                session_id: sessionId,
+                user_ask: functionCall.args?.user_ask || 'Please help me with my homework'
               }),
             });
             
@@ -266,6 +279,8 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                 }]
               });
             }
+          } finally {
+            setIsAnalyzingImage(false);
           }
         }
       }
@@ -636,7 +651,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           
           <div className="flex gap-6">
             {/* Image Panel */}
-            <div className="w-1/3">
+            <div className="w-1/3 relative">
               {lastImageUrl ? (
                 <div>
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Latest Picture</h3>
@@ -652,6 +667,16 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                     <div className="text-lg mb-2">📷</div>
                     <div className="text-sm">No image captured yet</div>
                     <div className="text-xs">Start recording to take a picture</div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Loading Overlay */}
+              {isAnalyzingImage && (
+                <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
+                  <div className="text-center text-white">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
+                    <div className="text-sm font-medium">Checking your work...</div>
                   </div>
                 </div>
               )}

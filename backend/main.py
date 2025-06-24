@@ -8,7 +8,7 @@ import time
 import asyncio
 from typing import Optional
 from google import genai
-from google.genai import types
+from google.genai.types import Part, HttpOptions
 
 app = FastAPI(title="HW Buddy Backend", version="1.0.0")
 
@@ -48,12 +48,9 @@ db = firestore.client()
 
 # Initialize Gemini client
 def get_gemini_client():
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable not set")
-    return genai.Client(api_key=api_key)
+    return genai.Client()
 
-async def analyze_image_with_gemini(image_url: str) -> str:
+async def analyze_image_with_gemini(image_url: str, user_ask: str = "Please help me with my homework") -> str:
     """
     Analyze an image using Gemini API and return a description of what's in the image,
     specifically focused on homework/educational content.
@@ -63,15 +60,17 @@ async def analyze_image_with_gemini(image_url: str) -> str:
         
         # Create content with the image and a prompt for homework analysis
         contents = [
-            types.Part.from_text(text="""You are a homework tutor assistant. Analyze this image of homework or educational material. \
-                                 Describe what you see in detail, including any text, math problems, diagrams, or educational content. \
-                                 Focus on identifying the subject area, specific problems or questions visible, and any work that has been done. \
-                                 If there are math problems, read them out. If there's text, transcribe the key parts. \
-                                 Be specific and helpful for a student who wants to understand what's in their homework."""
+            Part.from_text(text=f"""You are a homework tutor assistant. The student has asked: "{user_ask}" \
+                                 
+                                 Analyze this image of homework or educational material and provide specific next steps to help the student with their request. \
+                                 Focus on answering their question and giving actionable guidance. \
+                                 If you see math problems, help solve them step by step. If you see text, help with comprehension or writing. \
+                                 Be specific, encouraging, and provide helpful hints without giving away complete answers. \
+                                 Your response should directly address what the student is asking for."""
             ),
-            types.Part.from_uri(
-                file_uri="hw-buddy-462818.firebasestorage.app/images/b8abcd77-2eed-41e8-8c69-20a885fe8c77/test_image.jpg",
-                mime_type='image/jpeg'
+            Part.from_uri(
+                file_uri=image_url,
+                mime_type="image/jpeg"
             )
         ]
         
@@ -89,6 +88,7 @@ async def analyze_image_with_gemini(image_url: str) -> str:
 
 class TakePictureRequest(BaseModel):
     session_id: str
+    user_ask: Optional[str] = "Please help me with my homework"
 
 class TakePictureResponse(BaseModel):
     success: bool
@@ -147,7 +147,7 @@ async def take_picture(request: TakePictureRequest):
                     try:
                         # Try to use GCS URL first, fallback to HTTP URL
                         url_to_analyze = new_image_gcs_url if new_image_gcs_url else new_image_url
-                        image_description = await analyze_image_with_gemini(url_to_analyze)
+                        image_description = await analyze_image_with_gemini(url_to_analyze, request.user_ask)
                     except Exception as e:
                         print(f"Failed to analyze image: {e}")
                         image_description = "I can see that a picture was taken, but I couldn't analyze its contents."
