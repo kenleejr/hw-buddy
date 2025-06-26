@@ -2,12 +2,33 @@
 
 import { cn } from "@/lib/utils"
 import { Button } from "./button"
+import { StatusModal } from "./status-modal"
+import { RecordingIndicator } from "./recording-indicator"
 
 interface NavigationProps {
   currentPage?: "hw-buddy" | "parents"
+  // Session-specific props (optional)
+  sessionId?: string
+  status?: string
+  error?: string
+  audioLevel?: number
+  isRecording?: boolean
+  onEndSession?: () => void
+  onStopRecording?: () => void
 }
 
-export function Navigation({ currentPage = "hw-buddy" }: NavigationProps) {
+export function Navigation({ 
+  currentPage = "hw-buddy",
+  sessionId,
+  status,
+  error,
+  audioLevel,
+  isRecording,
+  onEndSession,
+  onStopRecording
+}: NavigationProps) {
+  const isInSession = sessionId && status && onEndSession;
+
   return (
     <nav className="w-full bg-white border-b border-border shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -36,6 +57,29 @@ export function Navigation({ currentPage = "hw-buddy" }: NavigationProps) {
               Parents
             </Button>
           </div>
+          
+          {/* Recording Controls and Status */}
+          {isInSession && (
+            <div className="flex items-center gap-3">
+              {/* Recording Indicator */}
+              {onStopRecording && (
+                <RecordingIndicator
+                  isRecording={isRecording || false}
+                  onStopRecording={onStopRecording}
+                />
+              )}
+              
+              {/* Status Modal */}
+              <StatusModal
+                sessionId={sessionId}
+                status={status || ""}
+                error={error || ""}
+                audioLevel={audioLevel || 0}
+                isRecording={isRecording || false}
+                onEndSession={onEndSession}
+              />
+            </div>
+          )}
         </div>
       </div>
     </nav>

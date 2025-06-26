@@ -126,7 +126,7 @@ async def take_picture(request: TakePictureRequest):
         
         # Poll for the image URL update (with timeout)
         max_wait_time = 30  # 30 seconds timeout
-        poll_interval = 0.5  # Check every 500ms
+        poll_interval = 0.05 # Check every 500ms
         start_time = time.time()
         
         while time.time() - start_time < max_wait_time:

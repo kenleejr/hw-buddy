@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Session, Modality } from '@google/genai';
 import { createBlob, decode, decodeAudioData } from '../utils/audio';
+import { Navigation } from '@/components/ui/navigation';
+import { CentralStartButton } from '@/components/ui/central-start-button';
+import { ChatPanel } from '@/components/ui/chat-panel';
 
 interface GeminiLiveSessionProps {
   sessionId: string;
@@ -20,7 +23,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const [status, setStatus] = useState('Initializing...');
   const [error, setError] = useState('');
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
-  const [currentTranscript, setCurrentTranscript] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
   const [lastImageUrl, setLastImageUrl] = useState<string | null>(null);
   const [currentUserMessage, setCurrentUserMessage] = useState('');
@@ -378,7 +380,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         setCurrentAssistantMessage('');
       }
       
-      setCurrentTranscript('');
     }
     
     // Handle input transcription (user speech)
@@ -453,7 +454,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       
       setIsRecording(true);
       setStatus('🔴 Recording... Speak now!');
-      setCurrentTranscript('Listening...');
       
       // Handle messages from the audio worklet (after setting isRecording = true)
       console.log('🎵 Setting up worklet message handler...');
@@ -546,194 +546,42 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     }, 1000);
   };
 
-  const testAudioOutput = async () => {
-    if (!outputAudioContextRef.current) return;
-    
-    console.log('🎵 Testing audio output...');
-    console.log('🎵 Output context state:', outputAudioContextRef.current.state);
-    
-    try {
-      // Resume context if needed
-      if (outputAudioContextRef.current.state === 'suspended') {
-        await outputAudioContextRef.current.resume();
-      }
-      
-      // Create a simple test tone
-      const oscillator = outputAudioContextRef.current.createOscillator();
-      const gainNode = outputAudioContextRef.current.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(outputAudioContextRef.current.destination);
-      
-      oscillator.frequency.setValueAtTime(440, outputAudioContextRef.current.currentTime); // A4 note
-      gainNode.gain.setValueAtTime(0.1, outputAudioContextRef.current.currentTime);
-      
-      oscillator.start(outputAudioContextRef.current.currentTime);
-      oscillator.stop(outputAudioContextRef.current.currentTime + 0.5); // Play for 0.5 seconds
-      
-      console.log('🎵 Test tone should be playing...');
-    } catch (error) {
-      console.error('🎵 Error testing audio output:', error);
-    }
-  };
 
   return (
-    <div className="min-h-screen bg-hw-light p-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6 border border-border">
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-bold text-hw-primary">
-              Homework Buddy - Session {sessionId}
-            </h1>
-            <button
-              onClick={onEndSession}
-              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md transition duration-200"
-            >
-              End Session
-            </button>
-          </div>
-          
-          {/* Status */}
-          <div className="flex justify-between items-center">
-            <div className="text-sm text-hw-accent">
-              Status: <span className={error ? 'text-red-600' : 'text-green-600'}>
-                {error || status}
-              </span>
-              {isRecording && (
-                <div className="mt-2">
-                  <div className="text-xs text-hw-accent">Microphone Level:</div>
-                  <div className="w-32 h-2 bg-hw-light rounded-full overflow-hidden border">
-                    <div 
-                      className="h-full bg-green-500 transition-all duration-100"
-                      style={{ width: `${Math.min(audioLevel * 10, 100)}%` }}
-                    />
-                  </div>
-                  <div className="text-xs text-hw-accent">
-                    Level: {audioLevel.toFixed(2)}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Controls */}
-            <div className="flex gap-2">
-              {isRecording ? (
-                <button
-                  onClick={stopRecording}
-                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md transition duration-200"
-                >
-                  ⏹️ Stop Recording
-                </button>
-              ) : (
-                <button
-                  onClick={startRecording}
-                  disabled={!!error}
-                  className="bg-hw-primary hover:bg-hw-primary/90 disabled:bg-hw-accent text-white px-4 py-2 rounded-md transition duration-200"
-                >
-                  🎤 Start Recording
-                </button>
-              )}
-              <button
-                onClick={testAudioOutput}
-                disabled={!!error}
-                className="bg-green-500 hover:bg-green-600 disabled:bg-hw-accent text-white px-4 py-2 rounded-md transition duration-200"
-              >
-                🔊 Test Audio
-              </button>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen bg-hw-light">
+      {/* Navigation with Status Modal */}
+      <Navigation 
+        currentPage="hw-buddy"
+        sessionId={sessionId}
+        status={status}
+        error={error}
+        audioLevel={audioLevel}
+        isRecording={isRecording}
+        onEndSession={onEndSession}
+        onStopRecording={stopRecording}
+      />
+      
+      <div className="container mx-auto px-4 py-8">
+        {/* Central Start Button - only show when not recording and no conversation */}
+        {!isRecording && conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && (
+          <CentralStartButton
+            isRecording={false}
+            isDisabled={!!error}
+            onStartRecording={startRecording}
+            onStopRecording={stopRecording}
+          />
+        )}
         
-        {/* Main Content: Image + Conversation */}
-        <div className="bg-white rounded-lg shadow-lg p-6 border border-border">
-          <h2 className="text-xl font-semibold text-hw-primary mb-4">Homework Assistant</h2>
-          
-          <div className="flex gap-6">
-            {/* Image Panel */}
-            <div className="w-1/3 relative">
-              {lastImageUrl ? (
-                <div>
-                  <h3 className="text-sm font-medium text-hw-accent mb-2">Latest Picture</h3>
-                  <img 
-                    src={lastImageUrl} 
-                    alt="Latest homework capture"
-                    className="w-full rounded-lg shadow-md border border-border"
-                  />
-                </div>
-              ) : (
-                <div className="w-full h-64 bg-hw-light rounded-lg border-2 border-dashed border-border flex items-center justify-center">
-                  <div className="text-center text-hw-accent">
-                    <div className="text-lg mb-2">📷</div>
-                    <div className="text-sm">No image captured yet</div>
-                    <div className="text-xs">Start recording to take a picture</div>
-                  </div>
-                </div>
-              )}
-              
-              {/* Loading Overlay */}
-              {isAnalyzingImage && (
-                <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
-                  <div className="text-center text-white">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-                    <div className="text-sm font-medium">Checking your work...</div>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Conversation Panel */}
-            <div className="w-2/3">
-              <h3 className="text-sm font-medium text-hw-accent mb-2">Conversation</h3>
-              <div className="space-y-3 max-h-96 overflow-y-auto bg-hw-light p-4 rounded-lg border border-border">
-                {conversation.length === 0 && !currentUserMessage && !currentAssistantMessage ? (
-                  <div className="text-center text-hw-accent py-8">
-                    Start recording to begin your conversation with Homework Buddy!
-                  </div>
-                ) : (
-                  <>
-                    {conversation.map((message, index) => (
-                      <div key={index} className="mb-3">
-                        <div className={`text-sm font-medium mb-1 ${
-                          message.type === 'user' ? 'text-hw-primary' : 'text-green-600'
-                        }`}>
-                          {message.type === 'user' ? 'You:' : 'Assistant:'}
-                        </div>
-                        <div className="text-foreground leading-relaxed">
-                          {message.content}
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {/* Live streaming user message */}
-                    {currentUserMessage && (
-                      <div className="mb-3">
-                        <div className="text-sm font-medium mb-1 text-hw-primary">You:</div>
-                        <div className="text-foreground leading-relaxed opacity-75">
-                          {currentUserMessage}
-                          <span className="animate-pulse">|</span>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Live streaming assistant message */}
-                    {currentAssistantMessage && (
-                      <div className="mb-3">
-                        <div className="text-sm font-medium mb-1 text-green-600">Assistant:</div>
-                        <div className="text-foreground leading-relaxed opacity-75">
-                          {currentAssistantMessage}
-                          <span className="animate-pulse">|</span>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-                
-                <div ref={conversationEndRef} />
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Chat Panel - Full Width */}
+        {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording) && (
+          <ChatPanel
+            conversation={conversation}
+            currentUserMessage={currentUserMessage}
+            currentAssistantMessage={currentAssistantMessage}
+            lastImageUrl={lastImageUrl}
+            isAnalyzingImage={isAnalyzingImage}
+          />
+        )}
       </div>
     </div>
   );
