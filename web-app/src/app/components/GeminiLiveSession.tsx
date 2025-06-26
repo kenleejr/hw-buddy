@@ -161,7 +161,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. \
               Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
               The backend will analyze the image and provide next steps specifically tailored to the user's request. \
-              Simply relay the backend's response to the user, as it contains the detailed analysis and next steps."
+              Simply relay the backend's response to the user, as it contains pointers to the student."
             }]
           }
         },
@@ -350,7 +350,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     // Handle interruption
     const interrupted = message.serverContent?.interrupted;
     if (interrupted) {
-      console.log('🎵 Handling interruption...');
       for (const source of sourcesRef.current.values()) {
         source.stop();
         sourcesRef.current.delete(source);
@@ -360,7 +359,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     
     // Handle turn completion and text streaming
     if (message.serverContent?.turnComplete) {
-      console.log('🎵 Turn completed');
       
       // Finalize current assistant message
       if (currentAssistantMessage.trim()) {
@@ -379,13 +377,11 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     
     // Handle input transcription (user speech)
     if (message.serverContent?.inputTranscription?.text) {
-      console.log('🎵 Input transcription:', message.serverContent.inputTranscription.text);
       setCurrentUserMessage(message.serverContent.inputTranscription.text);
     }
     
     // Handle output transcription (assistant speech)
     if (message.serverContent?.outputTranscription?.text) {
-      console.log('🎵 Output transcription:', message.serverContent.outputTranscription.text);
       setCurrentAssistantMessage(prev => prev + message.serverContent.outputTranscription.text);
     }
     

@@ -90,7 +90,14 @@ export function MathJaxRenderer({ content, className = "" }: MathJaxRendererProp
     <div className={`mathjax-container bg-white rounded-lg shadow-lg p-6 border border-border ${className}`}>
       <div className="text-center">
         <div className="text-sm font-medium text-hw-accent mb-3">📚 Problem Analysis</div>
-        <div className="text-lg leading-relaxed" ref={mathRef}>
+        <div 
+          className="text-lg" 
+          ref={mathRef} 
+          style={{ 
+            whiteSpace: 'pre-line',
+            lineHeight: '1.2'
+          }}
+        >
           {isLoaded ? content : (
             <div className="animate-pulse">Loading math...</div>
           )}

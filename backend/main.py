@@ -63,12 +63,21 @@ async def analyze_image_with_gemini(image_url: str, user_ask: str = "Please help
             Part.from_text(text=f"""You are a math homework tutor assistant. The student has asked: "{user_ask}" \
                                  
                                  Analyze this image of math homework or educational material. \
-                                 1. Convert the main content of what the student is asking about into MathJax syntax, including their current progress. \
-                                 2. Write down some pointers or helpers to aid the student in their progress. Be specific, encouraging, and provide helpful hints without giving away complete answers.
+                                 1. Convert the main content of what the student is asking about into MathJax syntax, including their current progress. Add a comment inline with their progress with a pointer. \
+                                 2. Write down some BRIEF pointers or helpers to aid the student in their progress. Be specific, encouraging, and provide helpful hints without giving away complete answers.
                                                       
+                                IMPORTANT: For the mathjax_content, use proper MathJax formatting:
+                                - Use $$...$$ for display math (equations on their own lines)  
+                                - Put each equation on consecutive lines with NO blank lines between them
+                                - Do NOT use \\n or \\\\ or double line breaks
+                                - Example format (no empty lines between):
+                                $$equation1$$
+                                $$equation2$$
+                                $$equation3$$
+                                
                                 Respond with the following JSON format:
                                 {{
-                                    "mathjax_content": <math_jax_content>,
+                                    "mathjax_content": <math_jax_content_with_proper_line_breaks>,
                                     "help_text": <help_text>
                                 }}
                                  Your response should directly address what the student is asking for."""
