@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader } from "./card";
 import { SeeWhatISeeButton } from "./see-what-i-see-button";
+import { MathJaxRenderer } from "./mathjax-renderer";
 
 interface ConversationMessage {
   timestamp: Date;
@@ -16,6 +17,7 @@ interface ChatPanelProps {
   currentAssistantMessage: string;
   lastImageUrl: string | null;
   isAnalyzingImage: boolean;
+  currentMathJax: string;
 }
 
 export function ChatPanel({ 
@@ -23,7 +25,8 @@ export function ChatPanel({
   currentUserMessage, 
   currentAssistantMessage,
   lastImageUrl,
-  isAnalyzingImage
+  isAnalyzingImage,
+  currentMathJax
 }: ChatPanelProps) {
   const conversationEndRef = React.useRef<HTMLDivElement>(null);
 
@@ -46,6 +49,13 @@ export function ChatPanel({
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-hw-primary"></div>
             <span className="text-hw-primary font-medium">Checking your work...</span>
           </div>
+        </div>
+      )}
+      
+      {/* MathJax Renderer */}
+      {currentMathJax && (
+        <div className="mb-4">
+          <MathJaxRenderer content={currentMathJax} />
         </div>
       )}
       

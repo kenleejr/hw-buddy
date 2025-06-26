@@ -28,6 +28,12 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const [currentUserMessage, setCurrentUserMessage] = useState('');
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const [currentMathJax, setCurrentMathJax] = useState('');
+
+  // Debug logging for currentMathJax changes
+  useEffect(() => {
+    console.log('🎵 currentMathJax state changed:', currentMathJax);
+  }, [currentMathJax]);
   
   const sessionRef = useRef<Session | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -81,15 +87,12 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       setStatus('Initializing audio...');
       
       // Initialize audio contexts
-      console.log('🎵 Creating audio contexts...');
       inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       
       // Load audio worklet processor
-      console.log('🎵 Loading audio worklet...');
       try {
         await inputAudioContextRef.current.audioWorklet.addModule('/audio-capture-processor.js');
-        console.log('🎵 Audio worklet loaded successfully');
       } catch (error) {
         console.error('🎵 Failed to load audio worklet:', error);
         throw error;
@@ -104,29 +107,20 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       
       nextStartTimeRef.current = outputAudioContextRef.current.currentTime;
       
-      console.log('🎵 Input audio context:', inputAudioContextRef.current);
-      console.log('🎵 Input context state:', inputAudioContextRef.current?.state);
-      console.log('🎵 Output audio context:', outputAudioContextRef.current);
-      console.log('🎵 Output context state:', outputAudioContextRef.current?.state);
-      console.log('🎵 Next start time:', nextStartTimeRef.current);
-      
       setStatus('Connecting to Gemini Live API...');
       
       const client = new GoogleGenAI({ 
          apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""
       });
       
-      console.log('🎵 Connecting to Gemini Live API...');
       const session = await client.live.connect({
         model: 'gemini-2.0-flash-live-001',
         callbacks: {
           onopen: () => {
-            console.log('🎵 Session opened successfully!');
             setStatus('Connected! Ready to record.');
             setError('');
           },
           onmessage: async (message: LiveServerMessage) => {
-            console.log('🎵 Received message:', message);
             await handleServerMessage(message);
           },
           onerror: (e: ErrorEvent) => {
@@ -135,7 +129,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
             setStatus('Error occurred');
           },
           onclose: (e: CloseEvent) => {
-            console.log('🎵 Session closed:', e);
             setStatus(`Connection closed: ${e.reason}`);
           },
         },
@@ -174,7 +167,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         },
       });
       
-      console.log('🎵 Session created:', session);
       sessionRef.current = session;
       
     } catch (err: any) {
@@ -185,9 +177,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   };
 
   const handleServerMessage = async (message: LiveServerMessage) => {
-    console.log('🎵 Handling server message:', message);
-    console.log('🎵 Server content:', message?.serverContent);
-    console.log('🎵 Tool call:', message?.toolCall);
     
     // Handle function calls
     const toolCall = message.toolCall;
@@ -224,6 +213,35 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               setLastImageUrl(result.image_url);
             }
             
+            // Parse the JSON response from backend
+            let parsedAnalysis = null;
+            let helpText = result.image_description || 'Unable to analyze image';
+            
+            console.log('🎵 Raw image_description from backend:', result.image_description);
+            
+            if (result.success && result.image_description) {
+              try {
+                parsedAnalysis = JSON.parse(result.image_description);
+                helpText = parsedAnalysis.help_text || result.image_description;
+                
+                console.log('🎵 Parsed analysis:', parsedAnalysis);
+                console.log('🎵 MathJax content:', parsedAnalysis.mathjax_content);
+                console.log('🎵 Help text:', helpText);
+                
+                // Update MathJax content if available
+                if (parsedAnalysis.mathjax_content) {
+                  console.log('🎵 Setting MathJax content:', parsedAnalysis.mathjax_content);
+                  setCurrentMathJax(parsedAnalysis.mathjax_content);
+                } else {
+                  console.log('🎵 No MathJax content found in response');
+                }
+              } catch (e) {
+                console.log('🎵 Response is not JSON, using as plain text:', e);
+                console.log('🎵 Raw content:', result.image_description);
+                helpText = result.image_description;
+              }
+            }
+            
             // Send function response back to Gemini with image analysis
             if (sessionRef.current) {
               sessionRef.current.sendToolResponse({
@@ -236,29 +254,29 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                       message: result.message,
                       image_url: result.image_url || null,
                       image_gcs_url: result.image_gcs_url || null,
-                      image_analysis: result.image_description || null
+                      image_analysis: helpText
                     }
                   }
                 }]
               });
               
-              // Send the image analysis as text to Gemini Live
-              if (result.success && result.image_description) {
-                console.log('🎵 Sending image analysis to Gemini Live');
+              // Send the help text to Gemini Live
+              if (result.success && helpText) {
+                console.log('🎵 Sending help text to Gemini Live');
                 
                 try {
                   sessionRef.current.sendClientContent({
                     turns: [{
                       role: 'user',
                       parts: [{
-                        text: `Image Analysis: ${result.image_description}`
+                        text: `Help Text: ${helpText}`
                       }]
                     }]
                   });
                   
-                  console.log('🎵 Image analysis sent to Gemini Live successfully');
+                  console.log('🎵 Help text sent to Gemini Live successfully');
                 } catch (error) {
-                  console.error('🎵 Error sending image analysis to Gemini Live:', error);
+                  console.error('🎵 Error sending help text to Gemini Live:', error);
                 }
               }
             }
@@ -289,29 +307,16 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     }
     
     // Handle audio response
-    console.log('🎵 Checking for audio in message...');
-    console.log('🎵 serverContent:', message.serverContent);
-    console.log('🎵 modelTurn:', message.serverContent?.modelTurn);
-    console.log('🎵 parts:', message.serverContent?.modelTurn?.parts);
-    
     const audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData;
-    console.log('🎵 Audio data found:', !!audio);
-    console.log('🎵 Audio object:', audio);
     
     if (audio && outputAudioContextRef.current) {
-      console.log('🎵 Processing audio response...');
-      console.log('🎵 Audio data length:', audio.data?.length);
-      console.log('🎵 Audio MIME type:', audio.mimeType);
-      
       nextStartTimeRef.current = Math.max(
         nextStartTimeRef.current,
         outputAudioContextRef.current.currentTime,
       );
-      console.log('🎵 Scheduled start time:', nextStartTimeRef.current);
 
       try {
         const decodedData = decode(audio.data || '');
-        console.log('🎵 Decoded data length:', decodedData.length);
         
         const audioBuffer = await decodeAudioData(
           decodedData,
@@ -319,24 +324,17 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           24000,
           1,
         );
-        console.log('🎵 Audio buffer created:', audioBuffer);
-        console.log('🎵 Audio buffer duration:', audioBuffer.duration);
         
         const source = outputAudioContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(outputGainRef.current!);
         
         source.addEventListener('ended', () => {
-          console.log('🎵 Audio playback ended');
           sourcesRef.current.delete(source);
         });
-
-        console.log('🎵 Starting audio playback at:', nextStartTimeRef.current);
-        console.log('🎵 Output context state before play:', outputAudioContextRef.current.state);
         
         // Resume context if suspended
         if (outputAudioContextRef.current.state === 'suspended') {
-          console.log('🎵 Resuming suspended audio context...');
           await outputAudioContextRef.current.resume();
         }
         
@@ -344,9 +342,6 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         nextStartTimeRef.current = nextStartTimeRef.current + audioBuffer.duration;
         sourcesRef.current.add(source);
         
-        console.log('🎵 Audio playback started successfully');
-        
-        // Audio response is handled in real-time via other message types
       } catch (error) {
         console.error('🎵 Error processing audio:', error);
       }
@@ -580,6 +575,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
             currentAssistantMessage={currentAssistantMessage}
             lastImageUrl={lastImageUrl}
             isAnalyzingImage={isAnalyzingImage}
+            currentMathJax={currentMathJax}
           />
         )}
       </div>

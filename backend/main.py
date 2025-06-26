@@ -60,12 +60,17 @@ async def analyze_image_with_gemini(image_url: str, user_ask: str = "Please help
         
         # Create content with the image and a prompt for homework analysis
         contents = [
-            Part.from_text(text=f"""You are a homework tutor assistant. The student has asked: "{user_ask}" \
+            Part.from_text(text=f"""You are a math homework tutor assistant. The student has asked: "{user_ask}" \
                                  
-                                 Analyze this image of homework or educational material and provide specific next steps to help the student with their request. \
-                                 Focus on answering their question and giving actionable guidance. \
-                                 If you see math problems, help solve them step by step. If you see text, help with comprehension or writing. \
-                                 Be specific, encouraging, and provide helpful hints without giving away complete answers. \
+                                 Analyze this image of math homework or educational material. \
+                                 1. Convert the main content of what the student is asking about into MathJax syntax, including their current progress. \
+                                 2. Write down some pointers or helpers to aid the student in their progress. Be specific, encouraging, and provide helpful hints without giving away complete answers.
+                                                      
+                                Respond with the following JSON format:
+                                {{
+                                    "mathjax_content": <math_jax_content>,
+                                    "help_text": <help_text>
+                                }}
                                  Your response should directly address what the student is asking for."""
             ),
             Part.from_uri(
@@ -79,8 +84,41 @@ async def analyze_image_with_gemini(image_url: str, user_ask: str = "Please help
             model='gemini-2.5-flash',
             contents=contents
         )
+
+        # Clean and parse the JSON response
+        raw_text = response.text.strip()
         
-        return response.text
+        # Remove common markdown formatting that LLMs add
+        if raw_text.startswith('```json'):
+            raw_text = raw_text[7:]  # Remove ```json
+        if raw_text.startswith('```'):
+            raw_text = raw_text[3:]   # Remove ```
+        if raw_text.endswith('```'):
+            raw_text = raw_text[:-3]  # Remove trailing ```
+        
+        raw_text = raw_text.strip()
+        
+        print(raw_text)
+        try:
+            # Try to parse as JSON
+            import json
+            parsed_response = json.loads(raw_text)
+            
+            # Validate expected structure
+            if isinstance(parsed_response, dict) and "mathjax_content" in parsed_response and "help_text" in parsed_response:
+                return json.dumps(parsed_response)  # Return clean JSON string
+            else:
+                # Fallback if structure is unexpected
+                return json.dumps({
+                    "mathjax_content": "",
+                    "help_text": raw_text
+                })
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return the raw text as help_text
+            return json.dumps({
+                "mathjax_content": "",
+                "help_text": raw_text
+            })
         
     except Exception as e:
         print(f"Error analyzing image with Gemini: {e}")
