@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { GeminiLiveSession } from "./components/GeminiLiveSession";
+import { Navigation } from "@/components/ui/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 export default function Home() {
   const [sessionId, setSessionId] = useState("");
@@ -29,39 +34,57 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold text-center text-gray-800 mb-8">
-          Homework Buddy
-        </h1>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label 
-              htmlFor="sessionId" 
-              className="block text-sm font-medium text-gray-700 mb-2 text-center"
-            >
-              Enter Session ID
-            </label>
-            <input
-              type="text"
-              id="sessionId"
-              value={sessionId}
-              onChange={(e) => setSessionId(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center"
-              placeholder="Session ID"
-              required
-            />
-          </div>
+    <div className="min-h-screen bg-hw-light">
+      <Navigation currentPage="hw-buddy" />
+      
+      <main className="flex items-center justify-center p-4 pt-16">
+        <Card className="max-w-md w-full shadow-lg">
+          <CardHeader className="text-center pb-4">
+            <div className="flex justify-center mb-6">
+              <Image
+                src="/hw_buddy_logo.png"
+                alt="Homework Buddy Logo"
+                width={200}
+                height={200}
+                className="rounded-lg"
+                priority
+              />
+            </div>
+            <CardTitle className="text-3xl font-bold text-hw-primary">
+              Welcome to Homework Buddy
+            </CardTitle>
+          </CardHeader>
           
-          <button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md transition duration-200 ease-in-out transform hover:scale-105"
-          >
-            Start Session
-          </button>
-        </form>
-      </div>
-    </main>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <label 
+                  htmlFor="sessionId" 
+                  className="block text-sm font-medium text-hw-accent text-center"
+                >
+                  Enter Session ID
+                </label>
+                <Input
+                  type="text"
+                  id="sessionId"
+                  value={sessionId}
+                  onChange={(e) => setSessionId(e.target.value)}
+                  className="text-center border-2 focus:border-hw-primary"
+                  placeholder="Session ID"
+                  required
+                />
+              </div>
+              
+              <Button
+                type="submit"
+                className="w-full bg-hw-primary hover:bg-hw-primary/90 text-white font-medium text-lg h-12"
+              >
+                Start Session
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </main>
+    </div>
   );
 }

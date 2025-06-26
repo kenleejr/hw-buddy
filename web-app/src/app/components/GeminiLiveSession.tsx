@@ -578,12 +578,12 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
+    <div className="min-h-screen bg-hw-light p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6 border border-border">
           <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-bold text-gray-800">
+            <h1 className="text-2xl font-bold text-hw-primary">
               Homework Buddy - Session {sessionId}
             </h1>
             <button
@@ -596,20 +596,20 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           
           {/* Status */}
           <div className="flex justify-between items-center">
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-hw-accent">
               Status: <span className={error ? 'text-red-600' : 'text-green-600'}>
                 {error || status}
               </span>
               {isRecording && (
                 <div className="mt-2">
-                  <div className="text-xs text-gray-500">Microphone Level:</div>
-                  <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="text-xs text-hw-accent">Microphone Level:</div>
+                  <div className="w-32 h-2 bg-hw-light rounded-full overflow-hidden border">
                     <div 
                       className="h-full bg-green-500 transition-all duration-100"
                       style={{ width: `${Math.min(audioLevel * 10, 100)}%` }}
                     />
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-hw-accent">
                     Level: {audioLevel.toFixed(2)}
                   </div>
                 </div>
@@ -629,7 +629,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                 <button
                   onClick={startRecording}
                   disabled={!!error}
-                  className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md transition duration-200"
+                  className="bg-hw-primary hover:bg-hw-primary/90 disabled:bg-hw-accent text-white px-4 py-2 rounded-md transition duration-200"
                 >
                   🎤 Start Recording
                 </button>
@@ -637,7 +637,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               <button
                 onClick={testAudioOutput}
                 disabled={!!error}
-                className="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md transition duration-200"
+                className="bg-green-500 hover:bg-green-600 disabled:bg-hw-accent text-white px-4 py-2 rounded-md transition duration-200"
               >
                 🔊 Test Audio
               </button>
@@ -646,24 +646,24 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         </div>
         
         {/* Main Content: Image + Conversation */}
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">Homework Assistant</h2>
+        <div className="bg-white rounded-lg shadow-lg p-6 border border-border">
+          <h2 className="text-xl font-semibold text-hw-primary mb-4">Homework Assistant</h2>
           
           <div className="flex gap-6">
             {/* Image Panel */}
             <div className="w-1/3 relative">
               {lastImageUrl ? (
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Latest Picture</h3>
+                  <h3 className="text-sm font-medium text-hw-accent mb-2">Latest Picture</h3>
                   <img 
                     src={lastImageUrl} 
                     alt="Latest homework capture"
-                    className="w-full rounded-lg shadow-md border"
+                    className="w-full rounded-lg shadow-md border border-border"
                   />
                 </div>
               ) : (
-                <div className="w-full h-64 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
-                  <div className="text-center text-gray-500">
+                <div className="w-full h-64 bg-hw-light rounded-lg border-2 border-dashed border-border flex items-center justify-center">
+                  <div className="text-center text-hw-accent">
                     <div className="text-lg mb-2">📷</div>
                     <div className="text-sm">No image captured yet</div>
                     <div className="text-xs">Start recording to take a picture</div>
@@ -684,10 +684,10 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
             
             {/* Conversation Panel */}
             <div className="w-2/3">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Conversation</h3>
-              <div className="space-y-3 max-h-96 overflow-y-auto bg-gray-50 p-4 rounded-lg">
+              <h3 className="text-sm font-medium text-hw-accent mb-2">Conversation</h3>
+              <div className="space-y-3 max-h-96 overflow-y-auto bg-hw-light p-4 rounded-lg border border-border">
                 {conversation.length === 0 && !currentUserMessage && !currentAssistantMessage ? (
-                  <div className="text-center text-gray-500 py-8">
+                  <div className="text-center text-hw-accent py-8">
                     Start recording to begin your conversation with Homework Buddy!
                   </div>
                 ) : (
@@ -695,11 +695,11 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                     {conversation.map((message, index) => (
                       <div key={index} className="mb-3">
                         <div className={`text-sm font-medium mb-1 ${
-                          message.type === 'user' ? 'text-blue-600' : 'text-green-600'
+                          message.type === 'user' ? 'text-hw-primary' : 'text-green-600'
                         }`}>
                           {message.type === 'user' ? 'You:' : 'Assistant:'}
                         </div>
-                        <div className="text-gray-800 leading-relaxed">
+                        <div className="text-foreground leading-relaxed">
                           {message.content}
                         </div>
                       </div>
@@ -708,8 +708,8 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                     {/* Live streaming user message */}
                     {currentUserMessage && (
                       <div className="mb-3">
-                        <div className="text-sm font-medium mb-1 text-blue-600">You:</div>
-                        <div className="text-gray-800 leading-relaxed opacity-75">
+                        <div className="text-sm font-medium mb-1 text-hw-primary">You:</div>
+                        <div className="text-foreground leading-relaxed opacity-75">
                           {currentUserMessage}
                           <span className="animate-pulse">|</span>
                         </div>
@@ -720,7 +720,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                     {currentAssistantMessage && (
                       <div className="mb-3">
                         <div className="text-sm font-medium mb-1 text-green-600">Assistant:</div>
-                        <div className="text-gray-800 leading-relaxed opacity-75">
+                        <div className="text-foreground leading-relaxed opacity-75">
                           {currentAssistantMessage}
                           <span className="animate-pulse">|</span>
                         </div>
