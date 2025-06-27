@@ -9,6 +9,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:qr_code_scanner/qr_code_scanner.dart';
 
 import 'firebase_options.dart';
 
@@ -30,10 +31,53 @@ class SessionModel extends ChangeNotifier {
   bool _isSessionActive = false;
   String _statusMessage = 'Ready';
   StreamSubscription? _sessionSubscription;
+  bool _isScanning = false;
 
   String? get sessionId => _sessionId;
   bool get isSessionActive => _isSessionActive;
   String get statusMessage => _statusMessage;
+  bool get isScanning => _isScanning;
+
+  void startScanning() {
+    _isScanning = true;
+    _statusMessage = 'Scanning QR code...';
+    notifyListeners();
+  }
+
+  void stopScanning() {
+    _isScanning = false;
+    _statusMessage = 'Ready';
+    notifyListeners();
+  }
+
+  void startSessionWithId(String sessionId) {
+    _sessionId = sessionId;
+    _isSessionActive = true;
+    _isScanning = false;
+    _statusMessage = 'Listening for commands...';
+
+    FirebaseFirestore.instance.collection('sessions').doc(_sessionId).set({
+      'status': 'ready',
+      'command': 'none',
+      'last_image_url': '',
+      'last_image_gcs_url': '',
+    });
+
+    _sessionSubscription = FirebaseFirestore.instance
+        .collection('sessions')
+        .doc(_sessionId)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        if (data['command'] == 'take_picture') {
+          takePictureAndUpload();
+        }
+      }
+    });
+
+    notifyListeners();
+  }
 
   void startSession() {
     _sessionId = const Uuid().v4();
@@ -114,6 +158,60 @@ class SessionModel extends ChangeNotifier {
   }
 }
 
+class QRScannerWidget extends StatefulWidget {
+  final Function(String) onQRCodeScanned;
+
+  const QRScannerWidget({Key? key, required this.onQRCodeScanned}) : super(key: key);
+
+  @override
+  State<QRScannerWidget> createState() => _QRScannerWidgetState();
+}
+
+class _QRScannerWidgetState extends State<QRScannerWidget> {
+  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
+  QRViewController? controller;
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    if (Platform.isAndroid) {
+      controller!.pauseCamera();
+    } else if (Platform.isIOS) {
+      controller!.resumeCamera();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return QRView(
+      key: qrKey,
+      onQRViewCreated: _onQRViewCreated,
+      overlay: QrScannerOverlayShape(
+        borderColor: Colors.red,
+        borderRadius: 10,
+        borderLength: 30,
+        borderWidth: 10,
+        cutOutSize: 300,
+      ),
+    );
+  }
+
+  void _onQRViewCreated(QRViewController controller) {
+    this.controller = controller;
+    controller.scannedDataStream.listen((scanData) {
+      if (scanData.code != null) {
+        widget.onQRCodeScanned(scanData.code!);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    controller?.dispose();
+    super.dispose();
+  }
+}
+
 class TutorCamApp extends StatelessWidget {
   const TutorCamApp({super.key});
 
@@ -124,31 +222,77 @@ class TutorCamApp extends StatelessWidget {
         appBar: AppBar(
           title: const Text('Tutor Cam'),
         ),
-        body: Center(
-          child: Consumer<SessionModel>(
-            builder: (context, session, child) {
-              return Column(
+        body: Consumer<SessionModel>(
+          builder: (context, session, child) {
+            if (session.isScanning) {
+              return Stack(
+                children: [
+                  QRScannerWidget(
+                    onQRCodeScanned: (sessionId) {
+                      session.startSessionWithId(sessionId);
+                    },
+                  ),
+                  Positioned(
+                    top: 20,
+                    left: 20,
+                    right: 20,
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Scan QR code from web app to connect',
+                        style: const TextStyle(color: Colors.white),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 100,
+                    left: 20,
+                    right: 20,
+                    child: ElevatedButton(
+                      onPressed: () => session.stopScanning(),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return Center(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if (session.isSessionActive)
                     Text('Session ID: ${session.sessionId}'),
                   Text(session.statusMessage),
+                  const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: () {
                       if (session.isSessionActive) {
                         session.stopSession();
                       } else {
-                        session.startSession();
+                        session.startScanning();
                       }
                     },
                     child: Text(
-                      session.isSessionActive ? 'Stop Session' : 'Start Session',
+                      session.isSessionActive ? 'Stop Session' : 'Scan QR Code',
                     ),
                   ),
+                  if (!session.isSessionActive) ...[
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: () => session.startSession(),
+                      child: const Text('Start without QR code'),
+                    ),
+                  ],
                 ],
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
