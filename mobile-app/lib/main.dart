@@ -12,12 +12,21 @@ import 'package:uuid/uuid.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 
 import 'firebase_options.dart';
+import 'camera_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
+  // Pre-initialize camera service for faster picture taking
+  try {
+    await CameraService.initialize();
+  } catch (e) {
+    print('Warning: Could not pre-initialize camera: $e');
+  }
+  
   runApp(
     ChangeNotifierProvider(
       create: (context) => SessionModel(),
@@ -120,25 +129,29 @@ class SessionModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final cameras = await availableCameras();
-      final firstCamera = cameras.first;
+      // Use pre-initialized camera service for fast capture
+      final image = await CameraService.takePicture();
+      
+      _statusMessage = 'Compressing image...';
+      notifyListeners();
+      
+      // Compress image to reduce upload time and storage costs
+      final compressedImage = await CameraService.compressImage(image.path);
 
-      final controller = CameraController(
-        firstCamera,
-        ResolutionPreset.medium,
-      );
-
-      await controller.initialize();
-      final image = await controller.takePicture();
+      _statusMessage = 'Uploading image...';
+      notifyListeners();
 
       final fileName = 'images/$_sessionId/${DateTime.now().toIso8601String()}.jpg';
       final storageRef = FirebaseStorage.instance.ref().child(fileName);
-      await storageRef.putFile(File(image.path));
+      await storageRef.putFile(compressedImage);
       final downloadURL = await storageRef.getDownloadURL();
       
       // Get the bucket name from Firebase Storage
       final bucket = storageRef.bucket;
       final gcsUrl = 'gs://$bucket/$fileName';
+
+      _statusMessage = 'Processing...';
+      notifyListeners();
 
       await FirebaseFirestore.instance
           .collection('sessions')
@@ -151,7 +164,8 @@ class SessionModel extends ChangeNotifier {
 
       _statusMessage = 'Listening for commands...';
     } catch (e) {
-      _statusMessage = 'Error: Could not upload photo';
+      _statusMessage = 'Error: Could not upload photo - $e';
+      print('Error in takePictureAndUpload: $e');
     } finally {
       notifyListeners();
     }

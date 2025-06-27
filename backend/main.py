@@ -9,6 +9,7 @@ import asyncio
 from typing import Optional
 from google import genai
 from google.genai.types import Part, HttpOptions
+from firestore_listener import get_firestore_listener
 
 app = FastAPI(title="HW Buddy Backend", version="1.0.0")
 
@@ -153,8 +154,8 @@ async def root():
 async def take_picture(request: TakePictureRequest):
     """
     Trigger a picture taking command for the specified session.
-    This updates the Firestore document which should trigger the mobile app to take a picture,
-    then polls for the resulting image URL.
+    This updates the Firestore document which triggers the mobile app to take a picture,
+    then uses real-time listeners for immediate response when image is ready.
     """
     try:
         session_ref = db.collection('sessions').document(request.session_id)
@@ -165,56 +166,58 @@ async def take_picture(request: TakePictureRequest):
         if current_doc.exists:
             current_data = current_doc.to_dict()
             current_image_url = current_data.get('last_image_url')
+        else:
+            return TakePictureResponse(
+                success=False,
+                message=f"Session {request.session_id} not found",
+                session_id=request.session_id,
+                image_url=None
+            )
         
         # Update the session document with the take_picture command
         session_ref.update({
             'command': 'take_picture'
         })
         
-        # Poll for the image URL update (with timeout)
-        max_wait_time = 30  # 30 seconds timeout
-        poll_interval = 0.05 # Check every 500ms
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait_time:
-            await asyncio.sleep(poll_interval)
+        # Use real-time listener instead of polling (much more efficient)
+        try:
+            listener = get_firestore_listener(db)
+            updated_data = await listener.wait_for_image_update(
+                session_id=request.session_id,
+                timeout=30,
+                current_image_url=current_image_url
+            )
             
-            # Check for updated image URL
-            updated_doc = session_ref.get()
-            if updated_doc.exists:
-                updated_data = updated_doc.to_dict()
-                new_image_url = updated_data.get('last_image_url')
-                
-                # If we have a new image URL (different from before)
-                if new_image_url and new_image_url != current_image_url:
-                    new_image_gcs_url = updated_data.get('last_image_gcs_url')
-                    
-                    # Analyze the image with Gemini
-                    image_description = None
-                    try:
-                        # Try to use GCS URL first, fallback to HTTP URL
-                        url_to_analyze = new_image_gcs_url if new_image_gcs_url else new_image_url
-                        image_description = await analyze_image_with_gemini(url_to_analyze, request.user_ask)
-                    except Exception as e:
-                        print(f"Failed to analyze image: {e}")
-                        image_description = "I can see that a picture was taken, but I couldn't analyze its contents."
-                    
-                    return TakePictureResponse(
-                        success=True,
-                        message=f"Picture taken and analyzed successfully for session {request.session_id}",
-                        session_id=request.session_id,
-                        image_url=new_image_url,
-                        image_gcs_url=new_image_gcs_url,
-                        image_description=image_description
-                    )
-        
-        # If we timeout waiting for the image
-        return TakePictureResponse(
-            success=False,
-            message=f"Timeout waiting for picture from session {request.session_id}",
-            session_id=request.session_id,
-            image_url=None
-        )
+            new_image_url = updated_data.get('last_image_url')
+            new_image_gcs_url = updated_data.get('last_image_gcs_url')
+            
+            # Analyze the image with Gemini
+            image_description = None
+            try:
+                # Try to use GCS URL first, fallback to HTTP URL
+                url_to_analyze = new_image_gcs_url if new_image_gcs_url else new_image_url
+                image_description = await analyze_image_with_gemini(url_to_analyze, request.user_ask)
+            except Exception as e:
+                print(f"Failed to analyze image: {e}")
+                image_description = "I can see that a picture was taken, but I couldn't analyze its contents."
+            
+            return TakePictureResponse(
+                success=True,
+                message=f"Picture taken and analyzed successfully for session {request.session_id}",
+                session_id=request.session_id,
+                image_url=new_image_url,
+                image_gcs_url=new_image_gcs_url,
+                image_description=image_description
+            )
+            
+        except Exception as listener_error:
+            # Handle timeout or other listener errors
+            return TakePictureResponse(
+                success=False,
+                message=f"Error waiting for picture: {str(listener_error)}",
+                session_id=request.session_id,
+                image_url=None
+            )
     
     except Exception as e:
         error_message = f"Failed to take picture: {str(e)}"
