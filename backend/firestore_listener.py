@@ -39,6 +39,9 @@ class FirestoreListener:
             Exception: If timeout is reached or other errors
         """
         
+        # Get the current event loop to use later
+        loop = asyncio.get_running_loop()
+        
         # Use a future to handle the async result
         future = asyncio.Future()
         listener = None
@@ -49,7 +52,9 @@ class FirestoreListener:
                 for doc in doc_snapshot:
                     if not doc.exists:
                         if not future.done():
-                            future.set_exception(Exception("Session document not found"))
+                            loop.call_soon_threadsafe(
+                                lambda: future.set_exception(Exception("Session document not found")) if not future.done() else None
+                            )
                         return
                     
                     data = doc.to_dict()
@@ -68,13 +73,13 @@ class FirestoreListener:
                         
                         if not future.done():
                             # Schedule the result to be set in the event loop
-                            asyncio.get_event_loop().call_soon_threadsafe(
+                            loop.call_soon_threadsafe(
                                 lambda: future.set_result(data) if not future.done() else None
                             )
                             
             except Exception as e:
                 if not future.done():
-                    asyncio.get_event_loop().call_soon_threadsafe(
+                    loop.call_soon_threadsafe(
                         lambda: future.set_exception(e) if not future.done() else None
                     )
         
