@@ -4,12 +4,52 @@ from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import credentials, firestore
 import os
-import time
-import asyncio
+import logging
+import traceback
 from typing import Optional
-from google import genai
-from google.genai.types import Part, HttpOptions
-from firestore_listener import get_firestore_listener
+from hw_tutor_agent import get_hw_tutor_agent
+
+import base64
+import os
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk import trace as trace_sdk
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry import trace
+
+# Load sensitive values from environment variables
+WANDB_BASE_URL = "https://trace.wandb.ai"
+# Your W&B entity/project name e.g. "myteam/myproject"
+PROJECT_ID = os.environ.get("WANDB_PROJECT_ID")  
+# Your W&B API key (found at https://wandb.ai/authorize)
+WANDB_API_KEY = os.environ.get("WANDB_API_KEY")  
+
+OTEL_EXPORTER_OTLP_ENDPOINT = f"{WANDB_BASE_URL}/otel/v1/traces"
+AUTH = base64.b64encode(f"api:{WANDB_API_KEY}".encode()).decode()
+
+OTEL_EXPORTER_OTLP_HEADERS = {
+    "Authorization": f"Basic {AUTH}",
+    "project_id": PROJECT_ID,
+}
+
+# Create the OTLP span exporter with endpoint and headers
+exporter = OTLPSpanExporter(
+    endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
+    headers=OTEL_EXPORTER_OTLP_HEADERS,
+)
+
+# Create a tracer provider and add the exporter
+tracer_provider = trace_sdk.TracerProvider()
+tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+# Set the global tracer provider BEFORE importing/using ADK
+trace.set_tracer_provider(tracer_provider)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="HW Buddy Backend", version="1.0.0")
 
@@ -47,92 +87,7 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# Initialize Gemini client
-def get_gemini_client():
-    return genai.Client()
 
-async def analyze_image_with_gemini(image_url: str, user_ask: str = "Please help me with my homework") -> str:
-    """
-    Analyze an image using Gemini API and return a description of what's in the image,
-    specifically focused on homework/educational content.
-    """
-    try:
-        client = get_gemini_client()
-        
-        # Create content with the image and a prompt for homework analysis
-        contents = [
-            Part.from_text(text=f"""You are a math homework tutor assistant. The student has asked: "{user_ask}" \
-                                 
-                                 Analyze this image of math homework or educational material. \
-                                 1. Convert the main content of what the student is asking about into MathJax syntax, including their current progress. Add a comment inline with their progress with a pointer. \
-                                 2. Write down some BRIEF pointers or helpers to aid the student in their progress. Be specific, encouraging, and provide helpful hints without giving away complete answers.
-                                                      
-                                IMPORTANT: For the mathjax_content, use proper MathJax formatting:
-                                - Use $$...$$ for display math (equations on their own lines)  
-                                - Put each equation on consecutive lines with NO blank lines between them
-                                - Do NOT use \\n or \\\\ or double line breaks
-                                - Example format (no empty lines between):
-                                $$equation1$$
-                                $$equation2$$
-                                $$equation3$$
-                                
-                                Respond with the following JSON format:
-                                {{
-                                    "mathjax_content": <math_jax_content_with_proper_line_breaks>,
-                                    "help_text": <help_text>
-                                }}
-                                 Your response should directly address what the student is asking for."""
-            ),
-            Part.from_uri(
-                file_uri=image_url,
-                mime_type="image/jpeg"
-            )
-        ]
-        
-        # Generate content
-        response = await client.aio.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=contents
-        )
-
-        # Clean and parse the JSON response
-        raw_text = response.text.strip()
-        
-        # Remove common markdown formatting that LLMs add
-        if raw_text.startswith('```json'):
-            raw_text = raw_text[7:]  # Remove ```json
-        if raw_text.startswith('```'):
-            raw_text = raw_text[3:]   # Remove ```
-        if raw_text.endswith('```'):
-            raw_text = raw_text[:-3]  # Remove trailing ```
-        
-        raw_text = raw_text.strip()
-        
-        print(raw_text)
-        try:
-            # Try to parse as JSON
-            import json
-            parsed_response = json.loads(raw_text)
-            
-            # Validate expected structure
-            if isinstance(parsed_response, dict) and "mathjax_content" in parsed_response and "help_text" in parsed_response:
-                return json.dumps(parsed_response)  # Return clean JSON string
-            else:
-                # Fallback if structure is unexpected
-                return json.dumps({
-                    "mathjax_content": "",
-                    "help_text": raw_text
-                })
-        except json.JSONDecodeError:
-            # If JSON parsing fails, return the raw text as help_text
-            return json.dumps({
-                "mathjax_content": "",
-                "help_text": raw_text
-            })
-        
-    except Exception as e:
-        print(f"Error analyzing image with Gemini: {e}")
-        return f"I can see an image was captured, but I couldn't analyze its contents due to an error: {str(e)}"
 
 class TakePictureRequest(BaseModel):
     session_id: str
@@ -153,74 +108,40 @@ async def root():
 @app.post("/take_picture", response_model=TakePictureResponse)
 async def take_picture(request: TakePictureRequest):
     """
-    Trigger a picture taking command for the specified session.
-    This updates the Firestore document which triggers the mobile app to take a picture,
-    then uses real-time listeners for immediate response when image is ready.
+    Process user request using ADK agent which intelligently decides when to take pictures.
+    The agent now maintains session state and only takes pictures when contextually relevant.
     """
-    try:
-        session_ref = db.collection('sessions').document(request.session_id)
-        
-        # Get the current state to check if there's already an image
-        current_doc = session_ref.get()
-        current_image_url = None
-        if current_doc.exists:
-            current_data = current_doc.to_dict()
-            current_image_url = current_data.get('last_image_url')
-        else:
-            return TakePictureResponse(
-                success=False,
-                message=f"Session {request.session_id} not found",
-                session_id=request.session_id,
-                image_url=None
-            )
-        
-        # Update the session document with the take_picture command
-        session_ref.update({
-            'command': 'take_picture'
-        })
-        
-        # Use real-time listener instead of polling (much more efficient)
-        try:
-            listener = get_firestore_listener(db)
-            updated_data = await listener.wait_for_image_update(
-                session_id=request.session_id,
-                timeout=30,
-                current_image_url=current_image_url
-            )
-            
-            new_image_url = updated_data.get('last_image_url')
-            new_image_gcs_url = updated_data.get('last_image_gcs_url')
-            
-            # Analyze the image with Gemini
-            image_description = None
-            try:
-                # Try to use GCS URL first, fallback to HTTP URL
-                url_to_analyze = new_image_gcs_url if new_image_gcs_url else new_image_url
-                image_description = await analyze_image_with_gemini(url_to_analyze, request.user_ask)
-            except Exception as e:
-                print(f"Failed to analyze image: {e}")
-                image_description = "I can see that a picture was taken, but I couldn't analyze its contents."
-            
-            return TakePictureResponse(
-                success=True,
-                message=f"Picture taken and analyzed successfully for session {request.session_id}",
-                session_id=request.session_id,
-                image_url=new_image_url,
-                image_gcs_url=new_image_gcs_url,
-                image_description=image_description
-            )
-            
-        except Exception as listener_error:
-            # Handle timeout or other listener errors
-            return TakePictureResponse(
-                success=False,
-                message=f"Error waiting for picture: {str(listener_error)}",
-                session_id=request.session_id,
-                image_url=None
-            )
+    logger.info(f"Received take_picture request for session {request.session_id} with query: {request.user_ask}")
     
+    try:
+        logger.info("Getting HW tutor agent instance...")
+        agent = get_hw_tutor_agent(db)
+        logger.info("HW tutor agent instance obtained successfully")
+        
+        logger.info(f"Processing user query through ADK agent for session {request.session_id}")
+        # Process the user query through the ADK agent
+        # The agent will decide whether to take a picture based on the user's request
+        agent_result = await agent.process_user_query(
+            session_id=request.session_id,
+            user_query=request.user_ask
+        )
+        logger.info(f"Agent result received: {agent_result}")
+        
+        response = TakePictureResponse(
+            success=True,
+            message=f"Request processed successfully for session {request.session_id}",
+            session_id=request.session_id,
+            image_url=agent_result.get("image_url"),
+            image_gcs_url=agent_result.get("image_gcs_url"),
+            image_description=agent_result.get("response")
+        )
+        logger.info(f"Returning successful response for session {request.session_id}")
+        return response
+            
     except Exception as e:
-        error_message = f"Failed to take picture: {str(e)}"
+        logger.error(f"Error processing request for session {request.session_id}: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        error_message = f"Failed to process request: {str(e)}"
         raise HTTPException(status_code=500, detail=error_message)
 
 @app.get("/health")

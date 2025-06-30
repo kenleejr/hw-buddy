@@ -114,7 +114,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       });
       
       const session = await client.live.connect({
-        model: 'gemini-2.5-flash-preview-native-audio-dialog',
+        model: 'gemini-2.0-flash-live-001',
         callbacks: {
           onopen: () => {
             setStatus('Connected! Ready to record.');
@@ -160,7 +160,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               text: "You are a homework buddy assistant. \
               When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. \
               Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
-              The backend will analyze the image and provide next steps specifically tailored to the user's request. \
+              The backend will analyze the image and provide next steps specifically tailored to the user's request. Note: this can take some time. \
               Simply relay the backend's response to the user, as it contains pointers to the student."
             }]
           }

@@ -8,6 +8,7 @@ node_modules/
 
 web-app/gemini-live-api-docs
 gemini_live_api_guide/
+adk_docs/
 
 # Testing
 /coverage
