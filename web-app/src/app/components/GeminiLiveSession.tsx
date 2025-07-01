@@ -29,6 +29,8 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [currentMathJax, setCurrentMathJax] = useState('');
+  const [websocketStatus, setWebsocketStatus] = useState('disconnected');
+  const [processingStatus, setProcessingStatus] = useState('');
 
   // Debug logging for currentMathJax changes
   useEffect(() => {
@@ -45,6 +47,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
+  const websocketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     initializeSession();
@@ -78,6 +81,9 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     }
     if (sessionRef.current) {
       sessionRef.current.close();
+    }
+    if (websocketRef.current) {
+      websocketRef.current.close();
     }
   };
 
@@ -158,10 +164,10 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           systemInstruction: {
             parts: [{
               text: "You are a homework buddy assistant. \
-              When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. \
+              When a user asks you anything, first respond with affirmative that you can help and then ALWAYS call the take_picture function. This will analyze the student's work and return with a reply. \
               Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
-              The backend will analyze the image and provide next steps specifically tailored to the user's request. Note: this can take some time. \
-              Simply relay the backend's response to the user, as it contains pointers to the student."
+              This function will analyze the student's progress and provide next steps specifically tailored to the user's request. Note: this can take some time. \
+              Simply relay the function's response to the user, as it contains pointers to the student."
             }]
           }
         },
@@ -169,10 +175,171 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       
       sessionRef.current = session;
       
+      // Initialize WebSocket connection for real-time updates
+      await initializeWebSocket();
+      
     } catch (err: any) {
       console.error('🎵 Failed to initialize session:', err);
       setError(`Failed to initialize: ${err.message}`);
       setStatus('Failed to connect');
+    }
+  };
+
+  const initializeWebSocket = async () => {
+    try {
+      console.log('🔌 Initializing WebSocket connection...');
+      setWebsocketStatus('connecting');
+      
+      const wsUrl = `ws://localhost:8000/ws/${sessionId}`;
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('🔌 WebSocket connected');
+        setWebsocketStatus('connected');
+        setStatus('WebSocket connected');
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          console.log('🔌 WebSocket message received:', message);
+          
+          handleWebSocketMessage(message);
+        } catch (error) {
+          console.error('🔌 Error parsing WebSocket message:', error);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('🔌 WebSocket error:', error);
+        setWebsocketStatus('error');
+        setError('WebSocket connection error');
+      };
+      
+      ws.onclose = (event) => {
+        console.log('🔌 WebSocket closed:', event.code, event.reason);
+        setWebsocketStatus('disconnected');
+        setStatus('WebSocket disconnected');
+      };
+      
+      websocketRef.current = ws;
+      
+    } catch (error) {
+      console.error('🔌 Failed to initialize WebSocket:', error);
+      setWebsocketStatus('error');
+      setError('Failed to connect WebSocket');
+    }
+  };
+
+  const handleWebSocketMessage = (message: any) => {
+    switch (message.type) {
+      case 'status_update':
+        console.log('🔌 Status update:', message.status, message.data);
+        setProcessingStatus(message.data.message || message.status);
+        
+        // Update specific UI states based on status
+        switch (message.status) {
+          case 'connected':
+            setStatus('🔗 Connected and ready');
+            break;
+          case 'error':
+            setError(message.data.message || 'An error occurred');
+            setStatus('❌ Error occurred');
+            setIsAnalyzingImage(false);
+            break;
+        }
+        break;
+        
+      case 'adk_event':
+        console.log('🔌 ADK Event:', message.event_type, message.data);
+        console.log('🔌 ADK Event - function_call:', message.data.function_call);
+        console.log('🔌 ADK Event - function_response:', message.data.function_response);
+        console.log('🔌 ADK Event - has_text_content:', message.data.has_text_content);
+        console.log('🔌 ADK Event - is_final:', message.data.is_final);
+        
+        // Handle specific ADK events and update processingStatus
+        if (message.data.function_call) {
+          console.log('🔌 Setting status: Taking picture...');
+          setProcessingStatus("📸 Taking picture of your homework...");
+        } else if (message.data.function_response) {
+          console.log('🔌 Setting status: Analyzing image...');
+          setProcessingStatus("🧠 Analyzing the image with AI...");
+        } else if (message.data.has_text_content && message.data.is_final) {
+          console.log('🔌 Setting status: Analysis complete...');
+          setProcessingStatus("✅ Analysis complete!");
+        } else if (message.data.has_text_content) {
+          console.log('🔌 Setting status: AI thinking...');
+          setProcessingStatus("🤔 AI is thinking and preparing response...");
+        }
+        break;
+        
+      case 'final_response':
+        console.log('🔌 Final response received:', message.data);
+        handleFinalResponse(message.data);
+        break;
+        
+      default:
+        console.log('🔌 Unknown message type:', message.type);
+    }
+  };
+
+  const handleFinalResponse = (responseData: any) => {
+    setIsAnalyzingImage(false);
+    setProcessingStatus('');
+    setStatus('✅ Analysis complete');
+    
+    // Update the last image URL if we got one
+    if (responseData.success && responseData.image_url) {
+      setLastImageUrl(responseData.image_url);
+    }
+    
+    // Parse the JSON response from backend
+    let parsedAnalysis = null;
+    let helpText = responseData.image_description || 'Unable to analyze image';
+    
+    console.log('🎵 Raw image_description from backend:', responseData.image_description);
+    
+    if (responseData.success && responseData.image_description) {
+      try {
+        parsedAnalysis = JSON.parse(responseData.image_description);
+        helpText = parsedAnalysis.help_text || responseData.image_description;
+        
+        console.log('🎵 Parsed analysis:', parsedAnalysis);
+        console.log('🎵 MathJax content:', parsedAnalysis.mathjax_content);
+        console.log('🎵 Help text:', helpText);
+        
+        // Update MathJax content if available
+        if (parsedAnalysis.mathjax_content) {
+          console.log('🎵 Setting MathJax content:', parsedAnalysis.mathjax_content);
+          setCurrentMathJax(parsedAnalysis.mathjax_content);
+        } else {
+          console.log('🎵 No MathJax content found in response');
+        }
+      } catch (e) {
+        console.log('🎵 Response is not JSON, using as plain text:', e);
+        console.log('🎵 Raw content:', responseData.image_description);
+        helpText = responseData.image_description;
+      }
+    }
+    
+    // Send the help text to Gemini Live
+    if (responseData.success && helpText && sessionRef.current) {
+      console.log('🎵 Sending help text to Gemini Live');
+      
+      try {
+        sessionRef.current.sendClientContent({
+          turns: [{
+            role: 'user',
+            parts: [{
+              text: `Help Text: ${helpText}`
+            }]
+          }]
+        });
+        
+        console.log('🎵 Help text sent to Gemini Live successfully');
+      } catch (error) {
+        console.error('🎵 Error sending help text to Gemini Live:', error);
+      }
     }
   };
 
@@ -187,102 +354,43 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         if (functionCall.name === 'take_picture') {
           console.log('🎵 Executing take_picture function...');
           setIsAnalyzingImage(true);
+          setStatus('📸 Preparing to take picture...');
           
           try {
-            // Call the backend API with user's ask
-            const response = await fetch('http://localhost:8000/take_picture', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                session_id: sessionId,
+            // Send WebSocket message instead of POST request
+            if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+              const message = {
+                type: 'process_query',
                 user_ask: functionCall.args?.user_ask || 'Please help me with my homework'
-              }),
-            });
-            
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const result = await response.json();
-            console.log('🎵 Take picture result:', result);
-            
-            // Update the last image URL if we got one
-            if (result.success && result.image_url) {
-              setLastImageUrl(result.image_url);
-            }
-            
-            // Parse the JSON response from backend
-            let parsedAnalysis = null;
-            let helpText = result.image_description || 'Unable to analyze image';
-            
-            console.log('🎵 Raw image_description from backend:', result.image_description);
-            
-            if (result.success && result.image_description) {
-              try {
-                parsedAnalysis = JSON.parse(result.image_description);
-                helpText = parsedAnalysis.help_text || result.image_description;
-                
-                console.log('🎵 Parsed analysis:', parsedAnalysis);
-                console.log('🎵 MathJax content:', parsedAnalysis.mathjax_content);
-                console.log('🎵 Help text:', helpText);
-                
-                // Update MathJax content if available
-                if (parsedAnalysis.mathjax_content) {
-                  console.log('🎵 Setting MathJax content:', parsedAnalysis.mathjax_content);
-                  setCurrentMathJax(parsedAnalysis.mathjax_content);
-                } else {
-                  console.log('🎵 No MathJax content found in response');
-                }
-              } catch (e) {
-                console.log('🎵 Response is not JSON, using as plain text:', e);
-                console.log('🎵 Raw content:', result.image_description);
-                helpText = result.image_description;
-              }
-            }
-            
-            // Send function response back to Gemini with image analysis
-            if (sessionRef.current) {
-              sessionRef.current.sendToolResponse({
-                functionResponses: [{
-                  id: functionCall.id,
-                  name: functionCall.name,
-                  response: {
-                    result: {
-                      success: result.success,
-                      message: result.message,
-                      image_url: result.image_url || null,
-                      image_gcs_url: result.image_gcs_url || null,
-                      image_analysis: helpText
-                    }
-                  }
-                }]
-              });
+              };
               
-              // Send the help text to Gemini Live
-              if (result.success && helpText) {
-                console.log('🎵 Sending help text to Gemini Live');
-                
-                try {
-                  sessionRef.current.sendClientContent({
-                    turns: [{
-                      role: 'user',
-                      parts: [{
-                        text: `Help Text: ${helpText}`
-                      }]
-                    }]
-                  });
-                  
-                  console.log('🎵 Help text sent to Gemini Live successfully');
-                } catch (error) {
-                  console.error('🎵 Error sending help text to Gemini Live:', error);
-                }
+              websocketRef.current.send(JSON.stringify(message));
+              console.log('🔌 Sent process_query via WebSocket:', message);
+              
+              // Send immediate response to Gemini to acknowledge the function call
+              if (sessionRef.current) {
+                sessionRef.current.sendToolResponse({
+                  functionResponses: [{
+                    id: functionCall.id,
+                    name: functionCall.name,
+                    response: {
+                      result: {
+                        success: true,
+                        message: "Processing your request via WebSocket...",
+                        status: "processing"
+                      }
+                    }
+                  }]
+                });
               }
+            } else {
+              throw new Error('WebSocket not connected');
             }
             
           } catch (error) {
-            console.error('🎵 Error taking picture:', error);
+            console.error('🎵 Error processing via WebSocket:', error);
+            setError(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            setIsAnalyzingImage(false);
             
             // Send error response back to Gemini
             if (sessionRef.current) {
@@ -293,14 +401,12 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                   response: {
                     result: {
                       success: false,
-                      message: `Error taking picture: ${error instanceof Error ? error.message : 'Unknown error'}`
+                      message: `Error processing request: ${error instanceof Error ? error.message : 'Unknown error'}`
                     }
                   }
                 }]
               });
             }
-          } finally {
-            setIsAnalyzingImage(false);
           }
         }
       }
@@ -572,6 +678,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
             lastImageUrl={lastImageUrl}
             isAnalyzingImage={isAnalyzingImage}
             currentMathJax={currentMathJax}
+            processingStatus={processingStatus}
           />
         )}
       </div>
