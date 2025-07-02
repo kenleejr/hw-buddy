@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+firebase-admin
+google-genai
+google-adk
+opentelemetry-exporter-otlp-proto-http
+opentelemetry-sdk
+pydantic

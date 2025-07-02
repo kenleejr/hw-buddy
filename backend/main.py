@@ -7,7 +7,7 @@ import os
 import logging
 import traceback
 from typing import Optional
-from hw_tutor_agent import get_hw_tutor_agent
+# from hw_tutor_agent import get_hw_tutor_agent  # No longer needed
 
 import base64
 import os
@@ -93,6 +93,11 @@ class TakePictureRequest(BaseModel):
     session_id: str
     user_ask: Optional[str] = "Please help me with my homework"
 
+class CaptureImageRequest(BaseModel):
+    session_id: str
+    user_question: str
+    context: Optional[str] = ""
+
 class TakePictureResponse(BaseModel):
     success: bool
     message: str
@@ -101,48 +106,115 @@ class TakePictureResponse(BaseModel):
     image_gcs_url: Optional[str] = None
     image_description: Optional[str] = None
 
+class CaptureImageResponse(BaseModel):
+    success: bool
+    message: str
+    session_id: str
+    image_url: Optional[str] = None
+    image_gcs_url: Optional[str] = None
+    image_data: Optional[str] = None  # Base64 encoded image data
+
 @app.get("/")
 async def root():
     return {"message": "HW Buddy Backend API"}
 
-@app.post("/take_picture", response_model=TakePictureResponse)
-async def take_picture(request: TakePictureRequest):
+@app.post("/capture_image", response_model=CaptureImageResponse)
+async def capture_image(request: CaptureImageRequest):
     """
-    Process user request using ADK agent which intelligently decides when to take pictures.
-    The agent now maintains session state and only takes pictures when contextually relevant.
+    Simplified image capture endpoint that triggers mobile camera and returns image data.
+    No AI processing - just pure image capture for Gemini Live to analyze.
     """
-    logger.info(f"Received take_picture request for session {request.session_id} with query: {request.user_ask}")
+    logger.info(f"Received capture_image request for session {request.session_id} with question: {request.user_question}")
     
     try:
-        logger.info("Getting HW tutor agent instance...")
-        agent = get_hw_tutor_agent(db)
-        logger.info("HW tutor agent instance obtained successfully")
+        # Trigger mobile camera via Firestore
+        session_ref = db.collection('sessions').document(request.session_id)
         
-        logger.info(f"Processing user query through ADK agent for session {request.session_id}")
-        # Process the user query through the ADK agent
-        # The agent will decide whether to take a picture based on the user's request
-        agent_result = await agent.process_user_query(
-            session_id=request.session_id,
-            user_query=request.user_ask
-        )
-        logger.info(f"Agent result received: {agent_result}")
+        logger.info(f"Triggering camera capture for session {request.session_id}")
         
-        response = TakePictureResponse(
-            success=True,
-            message=f"Request processed successfully for session {request.session_id}",
-            session_id=request.session_id,
-            image_url=agent_result.get("image_url"),
-            image_gcs_url=agent_result.get("image_gcs_url"),
-            image_description=agent_result.get("response")
+        # Send command to mobile app to take picture
+        session_ref.update({
+            'command': 'take_picture',
+            'user_question': request.user_question,
+            'context': request.context,
+            'timestamp': firestore.SERVER_TIMESTAMP
+        })
+        
+        # Wait for mobile app to upload image (polling approach)
+        import asyncio
+        import time
+        
+        max_wait_time = 15  # seconds
+        poll_interval = 0.5  # seconds
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            # Check if image has been uploaded
+            session_doc = session_ref.get()
+            if session_doc.exists:
+                session_data = session_doc.to_dict()
+                
+                if session_data.get('latest_image_url') and session_data.get('latest_image_gcs_url'):
+                    logger.info(f"Image captured successfully for session {request.session_id}")
+                    
+                    # Get base64 image data if available
+                    image_data = session_data.get('latest_image_data')  # Base64 encoded
+                    
+                    response = CaptureImageResponse(
+                        success=True,
+                        message=f"Image captured successfully for session {request.session_id}",
+                        session_id=request.session_id,
+                        image_url=session_data.get('latest_image_url'),
+                        image_gcs_url=session_data.get('latest_image_gcs_url'),
+                        image_data=image_data
+                    )
+                    logger.info(f"Returning successful image capture response for session {request.session_id}")
+                    return response
+            
+            await asyncio.sleep(poll_interval)
+        
+        # Timeout - no image received
+        logger.warning(f"Timeout waiting for image capture for session {request.session_id}")
+        response = CaptureImageResponse(
+            success=False,
+            message=f"Timeout waiting for image capture",
+            session_id=request.session_id
         )
-        logger.info(f"Returning successful response for session {request.session_id}")
         return response
             
     except Exception as e:
-        logger.error(f"Error processing request for session {request.session_id}: {str(e)}")
+        logger.error(f"Error capturing image for session {request.session_id}: {str(e)}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
-        error_message = f"Failed to process request: {str(e)}"
+        error_message = f"Failed to capture image: {str(e)}"
         raise HTTPException(status_code=500, detail=error_message)
+
+@app.post("/take_picture", response_model=TakePictureResponse)
+async def take_picture(request: TakePictureRequest):
+    """
+    Legacy endpoint - kept for backward compatibility
+    """
+    logger.info(f"Legacy take_picture endpoint called - redirecting to capture_image")
+    
+    # Convert to new request format
+    capture_request = CaptureImageRequest(
+        session_id=request.session_id,
+        user_question=request.user_ask or "Please help me with my homework"
+    )
+    
+    # Call the new endpoint
+    capture_result = await capture_image(capture_request)
+    
+    # Convert response back to legacy format
+    response = TakePictureResponse(
+        success=capture_result.success,
+        message=capture_result.message,
+        session_id=capture_result.session_id,
+        image_url=capture_result.image_url,
+        image_gcs_url=capture_result.image_gcs_url,
+        image_description=None  # No AI analysis in simplified version
+    )
+    
+    return response
 
 @app.get("/health")
 async def health_check():

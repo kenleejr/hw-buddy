@@ -114,7 +114,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       });
       
       const session = await client.live.connect({
-        model: 'gemini-2.0-flash-live-001',
+        model: 'gemini-live-2.5-flash-preview',
         callbacks: {
           onopen: () => {
             setStatus('Connected! Ready to record.');
@@ -139,29 +139,49 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          tools: [{
-            functionDeclarations: [{
-              name: "take_picture",
-              description: "Take a picture using the homework buddy camera system",
-              parameters: {
-                type: "object",
-                properties: {
-                  user_ask: {
-                    type: "string",
-                    description: "The user's specific question or request about their homework"
-                  }
+          tools: [
+            // Google Search grounding
+            { googleSearch: {} },
+            // Function calling with async behavior
+            {
+              functionDeclarations: [{
+                name: "take_picture",
+                description: "Take a picture of the student's homework or workspace to better understand what they're working on",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    user_question: {
+                      type: "string",
+                      description: "The student's specific question or what they need help with"
+                    },
+                    context: {
+                      type: "string",
+                      description: "Additional context about what the student is studying or working on"
+                    }
+                  },
+                  required: ["user_question"]
                 },
-                required: ["user_ask"]
-              }
-            }]
-          }],
+                behavior: "NON_BLOCKING"
+              }]
+            }
+          ],
           systemInstruction: {
             parts: [{
-              text: "You are a homework buddy assistant. \
-              When a user asks you anything, you should ALWAYS call the take_picture function first to capture an image of their work. \
-              Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
-              The backend will analyze the image and provide next steps specifically tailored to the user's request. Note: this can take some time. \
-              Simply relay the backend's response to the user, as it contains pointers to the student."
+              text: `You are an intelligent homework tutor assistant. Your goal is to provide personalized, step-by-step guidance to help students learn.
+
+When a student asks for help:
+1. If you need to see their work to provide better assistance, call the take_picture function to capture an image of their homework
+2. Use Google Search when you need current information or want to verify facts
+3. Provide clear, educational explanations that guide the student toward understanding
+4. Break down complex problems into manageable steps
+5. Encourage critical thinking by asking guiding questions
+6. Use proper mathematical notation when discussing math problems
+
+You have access to:
+- take_picture: Captures the student's workspace/homework for visual analysis
+- Google Search: For current information and fact verification
+
+Always be encouraging and supportive in your tutoring approach.`
             }]
           }
         },
@@ -176,6 +196,101 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     }
   };
 
+  const handleTakePictureAsync = async (functionCall: any, sessionId: string) => {
+    try {
+      console.log('🎵 Taking picture asynchronously...');
+      
+      // Call the simplified backend endpoint to trigger image capture
+      const response = await fetch('http://localhost:8000/capture_image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_question: functionCall.args?.user_question || 'Please help me with my homework',
+          context: functionCall.args?.context || ''
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('🎵 Image capture result:', result);
+      
+      // Update the last image URL if we got one
+      if (result.success && result.image_url) {
+        setLastImageUrl(result.image_url);
+      }
+      
+      // Send function response back to Gemini with scheduling
+      if (sessionRef.current) {
+        sessionRef.current.sendToolResponse({
+          functionResponses: [{
+            id: functionCall.id,
+            name: functionCall.name,
+            response: {
+              result: {
+                success: result.success,
+                message: result.message,
+                image_url: result.image_url || null,
+                image_gcs_url: result.image_gcs_url || null
+              }
+            },
+            scheduling: "INTERRUPT" // Interrupt current response to provide image context
+          }]
+        });
+        
+        // If we have an image, send it to Gemini Live for analysis
+        if (result.success && result.image_gcs_url) {
+          console.log('🎵 Sending image to Gemini Live for analysis');
+          
+          try {
+            sessionRef.current.sendClientContent({
+              turns: [{
+                role: 'user',
+                parts: [{
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: result.image_data // Base64 encoded image data
+                  }
+                }, {
+                  text: `I've captured an image of my homework. ${functionCall.args?.user_question || 'Please help me understand this.'} ${functionCall.args?.context || ''}`
+                }]
+              }]
+            });
+            
+            console.log('🎵 Image sent to Gemini Live for analysis');
+          } catch (error) {
+            console.error('🎵 Error sending image to Gemini Live:', error);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('🎵 Error in async picture taking:', error);
+      
+      // Send error response back to Gemini
+      if (sessionRef.current) {
+        sessionRef.current.sendToolResponse({
+          functionResponses: [{
+            id: functionCall.id,
+            name: functionCall.name,
+            response: {
+              result: {
+                success: false,
+                message: `Error taking picture: ${error instanceof Error ? error.message : 'Unknown error'}`
+              }
+            },
+            scheduling: "WHEN_IDLE" // Don't interrupt current response for errors
+          }]
+        });
+      }
+    }
+  };
+
   const handleServerMessage = async (message: LiveServerMessage) => {
     
     // Handle function calls
@@ -185,125 +300,25 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       
       for (const functionCall of toolCall.functionCalls) {
         if (functionCall.name === 'take_picture') {
-          console.log('🎵 Executing take_picture function...');
+          console.log('🎵 Executing take_picture function (async)...');
           setIsAnalyzingImage(true);
           
-          try {
-            // Call the backend API with user's ask
-            const response = await fetch('http://localhost:8000/take_picture', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                session_id: sessionId,
-                user_ask: functionCall.args?.user_ask || 'Please help me with my homework'
-              }),
-            });
-            
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const result = await response.json();
-            console.log('🎵 Take picture result:', result);
-            
-            // Update the last image URL if we got one
-            if (result.success && result.image_url) {
-              setLastImageUrl(result.image_url);
-            }
-            
-            // Parse the JSON response from backend
-            let parsedAnalysis = null;
-            let helpText = result.image_description || 'Unable to analyze image';
-            
-            console.log('🎵 Raw image_description from backend:', result.image_description);
-            
-            if (result.success && result.image_description) {
-              try {
-                parsedAnalysis = JSON.parse(result.image_description);
-                helpText = parsedAnalysis.help_text || result.image_description;
-                
-                console.log('🎵 Parsed analysis:', parsedAnalysis);
-                console.log('🎵 MathJax content:', parsedAnalysis.mathjax_content);
-                console.log('🎵 Help text:', helpText);
-                
-                // Update MathJax content if available
-                if (parsedAnalysis.mathjax_content) {
-                  console.log('🎵 Setting MathJax content:', parsedAnalysis.mathjax_content);
-                  setCurrentMathJax(parsedAnalysis.mathjax_content);
-                } else {
-                  console.log('🎵 No MathJax content found in response');
-                }
-              } catch (e) {
-                console.log('🎵 Response is not JSON, using as plain text:', e);
-                console.log('🎵 Raw content:', result.image_description);
-                helpText = result.image_description;
-              }
-            }
-            
-            // Send function response back to Gemini with image analysis
-            if (sessionRef.current) {
-              sessionRef.current.sendToolResponse({
-                functionResponses: [{
-                  id: functionCall.id,
-                  name: functionCall.name,
-                  response: {
-                    result: {
-                      success: result.success,
-                      message: result.message,
-                      image_url: result.image_url || null,
-                      image_gcs_url: result.image_gcs_url || null,
-                      image_analysis: helpText
-                    }
-                  }
-                }]
-              });
-              
-              // Send the help text to Gemini Live
-              if (result.success && helpText) {
-                console.log('🎵 Sending help text to Gemini Live');
-                
-                try {
-                  sessionRef.current.sendClientContent({
-                    turns: [{
-                      role: 'user',
-                      parts: [{
-                        text: `Help Text: ${helpText}`
-                      }]
-                    }]
-                  });
-                  
-                  console.log('🎵 Help text sent to Gemini Live successfully');
-                } catch (error) {
-                  console.error('🎵 Error sending help text to Gemini Live:', error);
-                }
-              }
-            }
-            
-          } catch (error) {
-            console.error('🎵 Error taking picture:', error);
-            
-            // Send error response back to Gemini
-            if (sessionRef.current) {
-              sessionRef.current.sendToolResponse({
-                functionResponses: [{
-                  id: functionCall.id,
-                  name: functionCall.name,
-                  response: {
-                    result: {
-                      success: false,
-                      message: `Error taking picture: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }
-                  }
-                }]
-              });
-            }
-          } finally {
-            setIsAnalyzingImage(false);
-          }
+          // Execute the function asynchronously without blocking the conversation
+          handleTakePictureAsync(functionCall, sessionId)
+            .finally(() => setIsAnalyzingImage(false));
         }
       }
+    }
+    
+    // Handle Google Search results
+    if (message.serverContent?.groundingMetadata?.webSearchQueries) {
+      const queries = message.serverContent.groundingMetadata.webSearchQueries;
+      console.log('🎵 Google Search queries:', queries);
+      setCurrentAssistantMessage(prev => prev + ` [Searching: ${queries.join(', ')}] `);
+    }
+    
+    if (message.serverContent?.groundingMetadata?.searchEntryPoint) {
+      console.log('🎵 Search results available');
     }
     
     // Handle audio response

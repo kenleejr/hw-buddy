@@ -96,3 +96,7 @@ firestore-debug.log
 # Temporary folders
 tmp/
 temp/
+
+donotinclude/
+
+backend/venv
