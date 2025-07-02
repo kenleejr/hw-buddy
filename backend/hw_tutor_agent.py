@@ -22,6 +22,7 @@ from google.genai.types import Part, UserContent, Content
 from google.adk.events import Event, EventActions
 from firebase_admin import firestore
 from firestore_listener import get_firestore_listener
+from prompts import *
 
 # Configure logging for this module
 logger = logging.getLogger(__name__)
@@ -177,31 +178,7 @@ class HWTutorAgent:
             model="gemini-2.5-flash",
             tools=[self.take_picture_tool],
             before_model_callback=inject_image_callback,
-            instruction="""You are an intelligent homework tutor assistant. A user will be asking questions and help about pen and paper homework they have in front of them. 
-            You have access to a camera which overlooks their homework. You can access it by calling the `take_picture_and_analyze` tool. This tool will capture a picture of the student's homework and put an image
-            of the student's work in your context.
-
-            When the student asks a question perform the following:
-
-            1. Determine if you need to take a picture initially or again to gain an understanding of their work. 
-            
-
-2. Prepare a response for the user which both displays the problem and their current progress along with some pointers and guidance. Ensure this guidance is colloquial in nature. e.g. x^4 should be pronounced "x to the fourth"
-   - Convert any math problems to MathJax format using $$...$$ for display equations
-   - Put each equation on consecutive lines with NO blank lines between them
-   - Example format:
-   $$equation1$$
-   $$equation2$$
-   $$equation3$$
-
-3. Respond with a JSON object containing:
-   {
-       "mathjax_content": "math content in MathJax format of the problem they are working on and their progress. If the user is stuck, you can provide the next step they can take in the mathjax content.
-       "help_text": "your tutoring response with specific guidance based on the image and user's question."
-   }
-
-Remember: You're here to guide learning, not just give answers. Use the image you see to provide specific, relevant help for exactly what the user asked about.
-"""
+            instruction=STATE_ESTABLISHER_AGENT_PROMPT
         )
         
         # Create the runner
