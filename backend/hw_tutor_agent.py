@@ -10,12 +10,13 @@ import traceback
 import re
 from typing import Dict, Any, Optional
 from google import genai
-from google.adk.agents import LlmAgent
+from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.runners import Runner
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.sessions import InMemorySessionService
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.tools import FunctionTool, ToolContext
+from google.adk.tools.agent_tool import AgentTool
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.genai.types import Part, UserContent, Content
@@ -138,6 +139,17 @@ class HWTutorAgent:
             func=create_take_picture_and_analyze_function(self.db)
         )
         logger.info("Take_picture tool created successfully")
+
+        async def before_agent_callback1(callback_context: CallbackContext) -> Optional[Content]:
+            user_interaction_count = callback_context.state.get("user_interaction_count", 0)
+            if user_interaction_count == 0:
+                callback_context.state["problem_at_hand"] = "None"
+            elif callback_context.state.get("problem_at_hand", None):
+                callback_context.state["problem_at_hand"] = "None"
+
+            callback_context.state["user_interaction_count"] = user_interaction_count + 1
+            return None
+    
         
         # Define the before_model_callback to inject images
         def inject_image_callback(callback_context: CallbackContext, llm_request: LlmRequest):
@@ -171,19 +183,32 @@ class HWTutorAgent:
                 callback_context.state["pending_image_user_ask"] = None
                 
                 logger.info("Image successfully injected into LLM request")
+
+        self.hint_agent = LlmAgent(
+            name="HintAgent",
+            model="gemini-2.5-flash",
+            instruction=HINT_AGENT_PROMPT
+        )
         
         # Create the main tutoring agent
-        self.agent = LlmAgent(
+        self.state_establisher_agent = LlmAgent(
             name="HWTutorAgent",
             model="gemini-2.5-flash",
             tools=[self.take_picture_tool],
             before_model_callback=inject_image_callback,
+            output_key="problem_at_hand",
             instruction=STATE_ESTABLISHER_AGENT_PROMPT
+        )
+
+        self.root_agent = SequentialAgent(
+            name="root_agent",
+            before_agent_callback=[before_agent_callback1],
+            sub_agents=[self.state_establisher_agent, self.hint_agent]
         )
         
         # Create the runner
         self.runner = Runner(
-            agent=self.agent,
+            agent=self.root_agent,
             app_name="hw-buddy-tutor",
             session_service=self.session_service,
             artifact_service=self.artifact_service
@@ -299,25 +324,26 @@ class HWTutorAgent:
                     await self._send_event_update(session_id, event)
                 
                 # Check if this is a final response but don't return yet - collect it
-                if event.is_final_response() and not final_response_data:
+                if event.is_final_response() and not final_response_data and event.author == "root_agent":
                     logger.info("Found final response event!")
                     # Extract text content
-                    for part in event.content.parts:
-                        logger.info(f"Checking part: {part}")
-                        if hasattr(part, 'text') and part.text:
-                            logger.info(f"Found text in part: {part.text}")
-                            # Clean the response text to remove markdown formatting
-                            response_text = clean_agent_response(part.text)
-                            logger.info(f"Cleaned response text: {response_text}")
-                            
-                            # Store just the response text for now
-                            # We'll get the image URLs after the loop when state is persisted
-                            final_response_data = {
-                                "response": response_text,
-                                "image_url": None,
-                                "image_gcs_url": None
-                            }
-            
+                    if event.content:
+                        for part in event.content.parts:
+                            logger.info(f"Checking part: {part}")
+                            if hasattr(part, 'text') and part.text:
+                                logger.info(f"Found text in part: {part.text}")
+                                # Clean the response text to remove markdown formatting
+                                response_text = clean_agent_response(part.text)
+                                logger.info(f"Cleaned response text: {response_text}")
+                                
+                                # Store just the response text for now
+                                # We'll get the image URLs after the loop when state is persisted
+                                final_response_data = {
+                                    "response": response_text,
+                                    "image_url": None,
+                                    "image_gcs_url": None
+                                }
+                
             # After the loop, get image URLs from the updated session state
             if final_response_data:
                 # Fetch the updated session to get the latest state after tool execution
