@@ -53,9 +53,10 @@ class HWTutorAgent:
     based on the conversation context and student needs.
     """
     
-    def __init__(self, db: firestore.Client):
+    def __init__(self, db: firestore.Client, connection_manager=None):
         logger.info("Initializing HWTutorAgent...")
         self.db = db
+        self.connection_manager = connection_manager
         
         logger.info("Creating session and artifact services...")
         self.session_service = InMemorySessionService()
@@ -195,11 +196,12 @@ class HWTutorAgent:
 
 3. Respond with a JSON object containing:
    {
-       "mathjax_content": "math content in MathJax format of the problem they are working on and their progress,
+       "mathjax_content": "math content in MathJax format of the problem they are working on and their progress. If the user is stuck, you can provide the next step they can take in the mathjax content.
        "help_text": "your tutoring response with specific guidance based on the image and user's question."
    }
 
-Remember: You're here to guide learning, not just give answers. Use the image you see to provide specific, relevant help for exactly what the user asked about."""
+Remember: You're here to guide learning, not just give answers. Use the image you see to provide specific, relevant help for exactly what the user asked about.
+"""
         )
         
         # Create the runner
@@ -209,6 +211,57 @@ Remember: You're here to guide learning, not just give answers. Use the image yo
             session_service=self.session_service,
             artifact_service=self.artifact_service
         )
+    
+    async def _send_event_update(self, session_id: str, event):
+        """Send relevant ADK event updates via WebSocket"""
+        try:
+            # Log the raw event for debugging
+            logger.info(f"🔍 RAW ADK EVENT - Content: {getattr(event, 'content', None)}")
+            logger.info(f"🔍 RAW ADK EVENT - Author: {getattr(event, 'author', None)}")
+            logger.info(f"🔍 RAW ADK EVENT - Actions: {getattr(event, 'actions', None)}")
+            
+            # Analyze the event and send meaningful updates
+            event_data = {
+                "event_id": getattr(event, 'id', ''),
+                "author": getattr(event, 'author', ''),
+                "timestamp": getattr(event, 'timestamp', 0),
+                "is_final": event.is_final_response() if hasattr(event, 'is_final_response') else False
+            }
+            
+            # Check for function calls (like taking pictures)
+            function_calls = event.get_function_calls() if hasattr(event, 'get_function_calls') else []
+            if function_calls:
+                for func_call in function_calls:
+                    if func_call.name == 'take_picture_and_analyze_tool':
+                        event_data["function_call"] = {
+                            "name": func_call.name,
+                            "args": func_call.args if hasattr(func_call, 'args') else {}
+                        }
+            
+            # Check for function responses
+            function_responses = event.get_function_responses() if hasattr(event, 'get_function_responses') else []
+            if function_responses:
+                for func_response in function_responses:
+                    if func_response.name == 'take_picture_and_analyze_tool':
+                        event_data["function_response"] = {
+                            "name": func_response.name,
+                            "response": str(func_response.response) if hasattr(func_response, 'response') else ""
+                        }
+            
+            # Check for text content (agent thinking/responding)
+            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                for part in event.content.parts:
+                    if hasattr(part, 'text') and part.text:
+                        event_data["has_text_content"] = True
+                        break
+            
+            # Send the processed event data
+            logger.info(f"🔍 Sending adk_event with data: {event_data}")
+            await self.connection_manager.send_event_update(session_id, "adk_event", event_data)
+            
+        except Exception as e:
+            logger.error(f"Error sending event update: {e}")
+            # Don't let event processing errors break the main flow
         
     async def process_user_query(self, session_id: str, user_query: str) -> dict:
         """
@@ -263,6 +316,10 @@ Remember: You're here to guide learning, not just give answers. Use the image yo
             ):
                 
                 response_events.append(event)
+                
+                # Send real-time event updates via WebSocket
+                if self.connection_manager:
+                    await self._send_event_update(session_id, event)
                 
                 # Check if this is a final response but don't return yet - collect it
                 if event.is_final_response() and not final_response_data:
@@ -382,9 +439,12 @@ Remember: You're here to guide learning, not just give answers. Use the image yo
 # Global instance to be used by the API
 hw_tutor_agent_instance: Optional[HWTutorAgent] = None
 
-def get_hw_tutor_agent(db: firestore.Client) -> HWTutorAgent:
+def get_hw_tutor_agent(db: firestore.Client, connection_manager=None) -> HWTutorAgent:
     """Get or create the global HW tutor agent instance."""
     global hw_tutor_agent_instance
     if hw_tutor_agent_instance is None:
-        hw_tutor_agent_instance = HWTutorAgent(db)
+        hw_tutor_agent_instance = HWTutorAgent(db, connection_manager)
+    else:
+        # Update connection manager for existing instance
+        hw_tutor_agent_instance.connection_manager = connection_manager
     return hw_tutor_agent_instance
