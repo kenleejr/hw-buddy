@@ -50,7 +50,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           block: 'center',
           inline: 'nearest'
         });
-      }, 600); // Delay to account for MathJax animation (500ms) + buffer
+      }, 50); // Delay to account for MathJax animation (500ms) + buffer
     }
   }, [currentMathJax]);
 
