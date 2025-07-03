@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, forwardRef } from 'react';
 
 interface ProcessingStatusProps {
   status: string;
 }
 
-export function ProcessingStatus({ status }: ProcessingStatusProps) {
-  const [isVisible, setIsVisible] = useState(false);
-  const [currentStatus, setCurrentStatus] = useState('');
+export const ProcessingStatus = forwardRef<HTMLDivElement, ProcessingStatusProps>(
+  ({ status }, ref) => {
+    const [isVisible, setIsVisible] = useState(false);
+    const [currentStatus, setCurrentStatus] = useState('');
 
   useEffect(() => {
     if (status && status !== currentStatus) {
@@ -19,36 +20,40 @@ export function ProcessingStatus({ status }: ProcessingStatusProps) {
       setTimeout(() => {
         setCurrentStatus(status);
         setIsVisible(true);
-      }, 150);
+      }, 200);
     } else if (!status) {
       // Fade out when status is cleared
       setIsVisible(false);
       setTimeout(() => {
         setCurrentStatus('');
-      }, 150);
+      }, 200);
     }
   }, [status, currentStatus]);
 
   if (!currentStatus) return null;
 
-  return (
-    <div className="flex justify-center mt-8">
-      <div 
-        className={`
-          inline-flex items-center px-6 py-3 rounded-full 
-          bg-gradient-to-r from-blue-50 to-purple-50 
-          border border-blue-200 shadow-sm
-          transform transition-all duration-300 ease-in-out
-          ${isVisible 
-            ? 'opacity-100 scale-100 translate-y-0' 
-            : 'opacity-0 scale-95 translate-y-2'
-          }
-        `}
-      >
-        <div className="text-sm font-medium text-blue-800 animate-pulse">
-          {currentStatus}
+    return (
+      <div ref={ref} className="flex justify-center mt-12">
+        <div 
+          className={`
+            flex items-center justify-center px-12 py-8 rounded-2xl 
+            bg-gradient-to-br from-blue-100 to-purple-100 
+            border-2 border-blue-300 shadow-lg
+            min-w-[400px] min-h-[120px]
+            transform transition-all duration-700 ease-in-out
+            ${isVisible 
+              ? 'opacity-100 scale-100 translate-y-0' 
+              : 'opacity-0 scale-90 translate-y-4'
+            }
+          `}
+        >
+          <div className="text-2xl font-bold text-blue-900 animate-pulse text-center">
+            {currentStatus}
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);
+
+ProcessingStatus.displayName = 'ProcessingStatus';

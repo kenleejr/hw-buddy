@@ -29,10 +29,38 @@ from prompts import *
 logger = logging.getLogger(__name__)
 
 
+def fix_malformed_json(json_str: str) -> str:
+    """
+    Attempt to fix common JSON formatting issues like unescaped newlines and quotes.
+    """
+    # Fix unescaped newlines in JSON string values
+    # This is a simple regex approach that handles the most common cases
+    import re
+    
+    # Pattern to find content inside double quotes that contains unescaped newlines
+    def escape_newlines_in_values(match):
+        content = match.group(1)
+        # Escape newlines and other control characters
+        content = content.replace('\n', '\\n')
+        content = content.replace('\r', '\\r')
+        content = content.replace('\t', '\\t')
+        content = content.replace('\b', '\\b')
+        content = content.replace('\f', '\\f')
+        return f'"{content}"'
+    
+    # Find and fix string values with unescaped characters
+    # Pattern matches: "key": "value with potential newlines"
+    pattern = r'"([^"]*(?:\n|\r|\t|\b|\f)[^"]*)"'
+    fixed_json = re.sub(pattern, escape_newlines_in_values, json_str)
+    
+    return fixed_json
+
+
 def clean_agent_response(response_text: str) -> str:
     """
     Clean the agent response by removing common markdown formatting.
     Removes ```json prefix and ``` suffix that LLMs often add.
+    Also ensures proper JSON formatting by re-encoding if needed.
     """
     if not response_text:
         return response_text
@@ -46,7 +74,28 @@ def clean_agent_response(response_text: str) -> str:
     # Remove ``` at the end
     cleaned = re.sub(r'\s*```$', '', cleaned)
     
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+    
+    # Try to parse and re-encode as JSON to fix any formatting issues
+    try:
+        # If it's valid JSON, parse and re-encode to ensure proper escaping
+        parsed = json.loads(cleaned)
+        # Re-encode with proper escaping
+        cleaned = json.dumps(parsed, ensure_ascii=False)
+        logger.info("Successfully re-encoded agent response as proper JSON")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Agent response has malformed JSON, attempting to fix: {e}")
+        # Try to fix common JSON issues like unescaped newlines and quotes
+        try:
+            fixed_json = fix_malformed_json(cleaned)
+            parsed = json.loads(fixed_json)
+            cleaned = json.dumps(parsed, ensure_ascii=False)
+            logger.info("Successfully fixed and re-encoded malformed JSON")
+        except Exception as fix_error:
+            logger.error(f"Could not fix malformed JSON: {fix_error}")
+            # Return the cleaned text as-is if we can't fix it
+    
+    return cleaned
 
 
 class HWTutorAgent:

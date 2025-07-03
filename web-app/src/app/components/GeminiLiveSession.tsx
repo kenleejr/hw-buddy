@@ -39,6 +39,34 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   useEffect(() => {
     console.log('🎵 currentMathJax state changed:', currentMathJax);
   }, [currentMathJax]);
+
+  // Auto-scroll to ProcessingStatus when MathJax content updates
+  useEffect(() => {
+    if (currentMathJax && processingStatusRef.current) {
+      // Small delay to ensure MathJax animation completes
+      setTimeout(() => {
+        processingStatusRef.current?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center',
+          inline: 'nearest'
+        });
+      }, 600); // Delay to account for MathJax animation (500ms) + buffer
+    }
+  }, [currentMathJax]);
+
+  // Auto-scroll to ProcessingStatus when it appears (even if MathJax already exists)
+  useEffect(() => {
+    if (processingStatus && processingStatusRef.current) {
+      // Small delay to ensure processing status animation starts
+      setTimeout(() => {
+        processingStatusRef.current?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center',
+          inline: 'nearest'
+        });
+      }, 300); // Delay for processing status animation
+    }
+  }, [processingStatus]);
   
   const sessionRef = useRef<Session | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -51,6 +79,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
   const websocketRef = useRef<WebSocket | null>(null);
+  const processingStatusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     initializeSession();
@@ -197,7 +226,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       ws.onopen = () => {
         console.log('🔌 WebSocket connected');
         setWebsocketStatus('connected');
-        setStatus('WebSocket connected');
+        setStatus('Ask me about your homework!');
       };
       
       ws.onmessage = (event) => {
@@ -331,7 +360,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         }
       } catch (e) {
         console.log('🎵 Response is not JSON, using as plain text:', e);
-        console.log('🎵 Raw content:', responseData.image_description);
+        console.log('🎵 RaT content:', responseData.image_description);
         helpText = responseData.image_description;
       }
     }
@@ -690,7 +719,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
             <MathJaxDisplay content={currentMathJax} />
             
             {/* Processing Status - Below MathJax */}
-            <ProcessingStatus status={processingStatus} />
+            <ProcessingStatus ref={processingStatusRef} status={processingStatus} />
             
             {/* Chat Panel - Hidden by default, can be toggled if needed */}
             <div className="hidden">

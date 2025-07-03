@@ -68,9 +68,9 @@ export class EventParser {
   private static getFunctionCallStatus(functionCall: { name: string; args: any }, author: string): string {
     switch (functionCall.name) {
       case 'take_picture_and_analyze_tool':
-        return "👀 Checking your work...";
+        return "Checking your work...";
       default:
-        return `🔧 Working on it...`;
+        return `Working on it...`;
     }
   }
   
@@ -80,9 +80,9 @@ export class EventParser {
   private static getFunctionResponseStatus(functionResponse: { name: string; response: string }, author: string): string {
     switch (functionResponse.name) {
       case 'take_picture_and_analyze_tool':
-        return "🤔 Thinking...";
+        return "Thinking...";
       default:
-        return `✨ Processing...`;
+        return `Processing...`;
     }
   }
   
@@ -105,10 +105,10 @@ export class EventParser {
       default:
         // Generic handling for unknown authors
         if (isFinal) {
-          result.processingStatus = "✅ Ready!";
+          result.processingStatus = "Ready!";
           result.analysisComplete = true;
         } else {
-          result.processingStatus = "🤔 Thinking...";
+          result.processingStatus = "Thinking...";
         }
         return result;
     }
@@ -119,31 +119,10 @@ export class EventParser {
    */
   private static parseStateEstablisherContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
     if (isFinal) {
-      result.processingStatus = "📝 Memorizing your problem for later...";
-      
-      // Extract MathJax content from StateEstablisher final response
-      if (content && content.parts) {
-        for (const part of content.parts) {
-          if (part.text) {
-            try {
-              // Try to parse as JSON for structured content
-              const parsed = JSON.parse(part.text);
-              if (parsed.mathjax_content) {
-                result.mathJaxContent = this.postProcessMathJax(parsed.mathjax_content);
-                result.shouldUpdateMathJax = true;
-                console.log('🎯 StateEstablisher: Extracted and processed MathJax content:', result.mathJaxContent);
-              }
-            } catch (e) {
-              // If not JSON, assume the text content itself is MathJax
-              result.mathJaxContent = this.postProcessMathJax(part.text);
-              result.shouldUpdateMathJax = true;
-              console.log('🎯 StateEstablisher: Using and processing text content as MathJax');
-            }
-          }
-        }
-      }
+      result.processingStatus = "Problem Identified!";
+      // Don't auto-clear - let it stay until next agent updates
     } else {
-      result.processingStatus = "🔍 Understanding your problem...";
+      result.processingStatus = "Understanding your problem...";
     }
     
     return result;
@@ -154,11 +133,11 @@ export class EventParser {
    */
   private static parseHintAgentContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
     if (isFinal) {
-      result.processingStatus = "💡 Ready to help!";
+      result.processingStatus = "Ready to help!";
       result.analysisComplete = true;
       result.clearProcessingStatus = true; // Clear after a short delay
     } else {
-      result.processingStatus = "💭 Preparing to help...";
+      result.processingStatus = "Preparing to help...";
     }
     
     return result;
@@ -169,11 +148,11 @@ export class EventParser {
    */
   private static parseRootAgentContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
     if (isFinal) {
-      result.processingStatus = "✅ Ready!";
+      result.processingStatus = "Ready!";
       result.analysisComplete = true;
       result.clearProcessingStatus = true;
     } else {
-      result.processingStatus = "🤔 Thinking...";
+      result.processingStatus = "Thinking...";
     }
     
     return result;

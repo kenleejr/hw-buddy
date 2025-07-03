@@ -96,6 +96,8 @@ class ConnectionManager:
     def __init__(self):
         # Store active connections by session_id
         self.active_connections: Dict[str, WebSocket] = {}
+        # Track running tasks to properly cancel them
+        self.active_tasks: Dict[str, asyncio.Task] = {}
     
     async def connect(self, websocket: WebSocket, session_id: str):
         await websocket.accept()
@@ -106,53 +108,84 @@ class ConnectionManager:
         if session_id in self.active_connections:
             del self.active_connections[session_id]
             logger.info(f"WebSocket disconnected for session {session_id}")
+        
+        # Cancel any running tasks for this session
+        if session_id in self.active_tasks:
+            task = self.active_tasks[session_id]
+            if not task.done():
+                task.cancel()
+                logger.info(f"Cancelled running task for session {session_id}")
+            del self.active_tasks[session_id]
+    
+    def is_connected(self, session_id: str) -> bool:
+        """Check if a session is still connected"""
+        if session_id not in self.active_connections:
+            return False
+        
+        websocket = self.active_connections[session_id]
+        try:
+            # Check if the websocket is still in a valid state
+            return websocket.client_state.name in ["CONNECTED", "CONNECTING"]
+        except:
+            # If we can't check the state, assume disconnected
+            self.disconnect(session_id)
+            return False
     
     async def send_status_update(self, session_id: str, status: str, data: dict = None):
         """Send a status update to the frontend"""
-        if session_id in self.active_connections:
-            message = {
-                "type": "status_update",
-                "status": status,
-                "data": data or {}
-            }
-            try:
-                await self.active_connections[session_id].send_text(json.dumps(message))
-                logger.info(f"Sent status update to session {session_id}: {status}")
-            except Exception as e:
-                logger.error(f"Error sending status update to session {session_id}: {e}")
-                # Remove disconnected connection
-                self.disconnect(session_id)
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send status update to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "status_update",
+            "status": status,
+            "data": data or {}
+        }
+        try:
+            await self.active_connections[session_id].send_text(json.dumps(message))
+            logger.info(f"Sent status update to session {session_id}: {status}")
+        except Exception as e:
+            logger.error(f"Error sending status update to session {session_id}: {e}")
+            # Remove disconnected connection
+            self.disconnect(session_id)
     
     async def send_event_update(self, session_id: str, event_type: str, event_data: dict):
         """Send an ADK event update to the frontend"""
-        if session_id in self.active_connections:
-            message = {
-                "type": "adk_event",
-                "event_type": event_type,
-                "data": event_data
-            }
-            try:
-                await self.active_connections[session_id].send_text(json.dumps(message))
-                logger.info(f"Sent ADK event to session {session_id}: {event_type}")
-            except Exception as e:
-                logger.error(f"Error sending ADK event to session {session_id}: {e}")
-                # Remove disconnected connection
-                self.disconnect(session_id)
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send ADK event to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "adk_event",
+            "event_type": event_type,
+            "data": event_data
+        }
+        try:
+            await self.active_connections[session_id].send_text(json.dumps(message))
+            logger.info(f"Sent ADK event to session {session_id}: {event_type}")
+        except Exception as e:
+            logger.error(f"Error sending ADK event to session {session_id}: {e}")
+            # Remove disconnected connection
+            self.disconnect(session_id)
     
     async def send_final_response(self, session_id: str, response_data: dict):
         """Send the final response to the frontend"""
-        if session_id in self.active_connections:
-            message = {
-                "type": "final_response",
-                "data": response_data
-            }
-            try:
-                await self.active_connections[session_id].send_text(json.dumps(message))
-                logger.info(f"Sent final response to session {session_id}")
-            except Exception as e:
-                logger.error(f"Error sending final response to session {session_id}: {e}")
-                # Remove disconnected connection
-                self.disconnect(session_id)
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send final response to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "final_response",
+            "data": response_data
+        }
+        try:
+            await self.active_connections[session_id].send_text(json.dumps(message))
+            logger.info(f"Sent final response to session {session_id}")
+        except Exception as e:
+            logger.error(f"Error sending final response to session {session_id}: {e}")
+            # Remove disconnected connection
+            self.disconnect(session_id)
 
 
 # Global connection manager instance
@@ -186,7 +219,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await connection_manager.send_status_update(
             session_id, 
             "connected", 
-            {"message": "WebSocket connection established"}
+            {"message": "Welcome! Ask me anything about your homework!"}
         )
         
         # Keep connection alive and handle incoming messages
@@ -198,8 +231,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 
                 # Handle different message types
                 if message.get("type") == "process_query":
-                    # Process the user query asynchronously
-                    asyncio.create_task(process_query_websocket(session_id, message.get("user_ask", "")))
+                    # Cancel any existing task for this session
+                    if session_id in connection_manager.active_tasks:
+                        old_task = connection_manager.active_tasks[session_id]
+                        if not old_task.done():
+                            old_task.cancel()
+                            logger.info(f"Cancelled previous task for session {session_id}")
+                    
+                    # Create and track new task
+                    task = asyncio.create_task(process_query_websocket(session_id, message.get("user_ask", "")))
+                    connection_manager.active_tasks[session_id] = task
+                    
                 elif message.get("type") == "ping":
                     # Respond to ping to keep connection alive
                     await connection_manager.send_status_update(session_id, "pong", {})
@@ -235,7 +277,7 @@ async def process_query_websocket(session_id: str, user_ask: str):
         await connection_manager.send_status_update(
             session_id, 
             "agent_ready", 
-            {"message": "AI agent is ready, analyzing your request..."}
+            {"message": "Listening..."}
         )
         
         # Process the query (this will send events through the connection manager)

@@ -16,6 +16,7 @@ Your main goal is to maintain an accurate and up-to-date understanding of the st
     - Use $$...$$ for display equations (block-level, centered)
     - Use $...$ for inline math within text
     - Add blank lines between different sections/problems for better readability
+    - Double escape intended backdwards slashes in order to maintain proper json
     - Use proper mathematical formatting:
       * Fractions: \\fracs\{numerator\}\{denominator\}
       * Exponents: x^\{power\} 

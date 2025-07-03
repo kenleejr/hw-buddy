@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface MathJaxDisplayProps {
   content: string;
@@ -8,8 +8,27 @@ interface MathJaxDisplayProps {
 
 export function MathJaxDisplay({ content }: MathJaxDisplayProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [hasContent, setHasContent] = useState(false);
 
   useEffect(() => {
+    if (content && contentRef.current) {
+      // Fade out first if we already have content
+      if (hasContent) {
+        setIsVisible(false);
+        setTimeout(() => {
+          updateContent();
+        }, 200);
+      } else {
+        updateContent();
+      }
+    } else if (!content) {
+      setIsVisible(false);
+      setHasContent(false);
+    }
+  }, [content]);
+
+  const updateContent = () => {
     if (content && contentRef.current) {
       // Process content for better HTML rendering
       const processedContent = content
@@ -21,15 +40,22 @@ export function MathJaxDisplay({ content }: MathJaxDisplayProps) {
 
       // Update the content
       contentRef.current.innerHTML = processedContent;
+      setHasContent(true);
 
       // Trigger MathJax to process the new content
       if (typeof window !== 'undefined' && (window as any).MathJax?.typesetPromise) {
-        (window as any).MathJax.typesetPromise([contentRef.current]).catch((err: any) => {
+        (window as any).MathJax.typesetPromise([contentRef.current]).then(() => {
+          // Show with animation after MathJax processing
+          setIsVisible(true);
+        }).catch((err: any) => {
           console.error('MathJax typeset failed:', err);
+          setIsVisible(true); // Show anyway
         });
+      } else {
+        setIsVisible(true);
       }
     }
-  }, [content]);
+  };
 
   if (!content) {
     return (
@@ -46,12 +72,16 @@ export function MathJaxDisplay({ content }: MathJaxDisplayProps) {
       <div className="max-w-4xl w-full">
         <div 
           ref={contentRef}
-          className="
-            bg-white rounded-lg shadow-lg border border-gray-200 
+          className={`
+            bg-white rounded-3xl shadow-lg border border-gray-200 
             p-8 text-lg leading-relaxed
-            transform transition-all duration-300 ease-in-out
+            transform transition-all duration-500 ease-in-out
             hover:shadow-xl
-          "
+            ${isVisible 
+              ? 'opacity-100 scale-100 translate-y-0' 
+              : 'opacity-0 scale-95 translate-y-3'
+            }
+          `}
           style={{ 
             minHeight: '200px',
             lineHeight: '1.8',
