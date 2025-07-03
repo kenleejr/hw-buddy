@@ -1,0 +1,44 @@
+
+> homework-buddy@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.3.3
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.95:3000
+   - Environments: .env.local
+   - Experiments (use with caution):
+     ✓ typedRoutes
+
+ ✓ Starting...
+ ✓ Ready in 7.7s
+ ○ Compiling / ...
+ ✓ Compiled / in 13.4s (949 modules)
+ GET / 200 in 16077ms
+ ✓ Compiled in 3.5s (385 modules)
+ GET / 200 in 854ms
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 968ms (939 modules)
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 1251ms
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 85ms
+ GET / 200 in 249ms
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 38ms
+ ✓ Compiled in 674ms (949 modules)
+ GET / 200 in 106ms
+ GET / 200 in 203ms
+ ✓ Compiled /_not-found in 245ms (939 modules)
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 329ms
+ ✓ Compiled in 483ms (949 modules)
+ GET / 200 in 100ms
+ ✓ Compiled in 473ms (949 modules)
+ GET / 200 in 96ms
+ GET / 200 in 242ms
+ ✓ Compiled /_not-found in 223ms (939 modules)
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 335ms
+ GET / 200 in 291ms
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 49ms
+ ✓ Compiled in 522ms (949 modules)
+ GET / 200 in 112ms
+ GET / 200 in 197ms
+ ✓ Compiled /_not-found in 348ms (953 modules)
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 480ms
+[?25h

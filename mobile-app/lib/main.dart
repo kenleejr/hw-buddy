@@ -16,9 +16,20 @@ import 'camera_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  
+  // Initialize Firebase only if it hasn't been initialized yet
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    if (e.toString().contains('duplicate-app')) {
+      print('Firebase already initialized, continuing...');
+    } else {
+      print('Firebase initialization error: $e');
+      rethrow;
+    }
+  }
   
   // Pre-initialize camera service for faster picture taking
   try {
@@ -41,6 +52,7 @@ class SessionModel extends ChangeNotifier {
   String _statusMessage = 'Ready';
   StreamSubscription? _sessionSubscription;
   bool _isScanning = false;
+  bool _isProcessingImage = false;
 
   String? get sessionId => _sessionId;
   bool get isSessionActive => _isSessionActive;
@@ -125,6 +137,13 @@ class SessionModel extends ChangeNotifier {
   }
 
   Future<void> takePictureAndUpload() async {
+    // Prevent multiple simultaneous image processing
+    if (_isProcessingImage) {
+      print('Already processing an image, skipping...');
+      return;
+    }
+    
+    _isProcessingImage = true;
     _statusMessage = 'Taking picture...';
     notifyListeners();
 
@@ -167,6 +186,7 @@ class SessionModel extends ChangeNotifier {
       _statusMessage = 'Error: Could not upload photo - $e';
       print('Error in takePictureAndUpload: $e');
     } finally {
+      _isProcessingImage = false;
       notifyListeners();
     }
   }

@@ -1,0 +1,61 @@
+INFO:     Will watch for changes in these directories: ['/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [92134] using StatReload
+INFO:     Started server process [92139]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:61710 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61793 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61793 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61980 - "OPTIONS /capture_image HTTP/1.1" 200 OK
+2025-07-02 17:22:07,142 - main - INFO - Received capture_image request for session session_bwo9je0yk with question: the problem on the user's homework
+2025-07-02 17:22:07,142 - main - INFO - Triggering camera capture for session session_bwo9je0yk
+2025-07-02 17:22:07,698 - main - ERROR - Error capturing image for session session_bwo9je0yk: 404 No document to update: projects/hw-buddy-66d6b/databases/(default)/documents/sessions/session_bwo9je0yk
+2025-07-02 17:22:07,706 - main - ERROR - Full traceback: Traceback (most recent call last):
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/main.py", line 136, in capture_image
+    session_ref.update({
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/cloud/firestore_v1/document.py", line 325, in update
+    write_results = batch.commit(**kwargs)
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/cloud/firestore_v1/batch.py", line 61, in commit
+    commit_response = self._client._firestore_api.commit(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/cloud/firestore_v1/services/firestore/client.py", line 1431, in commit
+    response = rpc(
+               ^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/lltradingcorp/Documents/genai-apps/hw-buddy/backend/.venv/lib/python3.12/site-packages/google/api_core/grpc_helpers.py", line 78, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.NotFound: 404 No document to update: projects/hw-buddy-66d6b/databases/(default)/documents/sessions/session_bwo9je0yk
+
+INFO:     127.0.0.1:61980 - "POST /capture_image HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:62968 - "OPTIONS /capture_image HTTP/1.1" 200 OK
+2025-07-02 17:25:54,950 - main - INFO - Received capture_image request for session session_5gbf06i69 with question: Help me with my math problem.
+2025-07-02 17:25:54,950 - main - INFO - Triggering camera capture for session session_5gbf06i69
+2025-07-02 17:26:10,461 - main - WARNING - Timeout waiting for image capture for session session_5gbf06i69
+INFO:     127.0.0.1:62968 - "POST /capture_image HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49443 - "OPTIONS /capture_image HTTP/1.1" 200 OK
+2025-07-02 17:37:53,620 - main - INFO - Received capture_image request for session session_iafq8rw99 with question: Help with a math problem
+2025-07-02 17:37:53,620 - main - INFO - Triggering camera capture for session session_iafq8rw99
+2025-07-02 17:38:09,303 - main - WARNING - Timeout waiting for image capture for session session_iafq8rw99
+INFO:     127.0.0.1:49443 - "POST /capture_image HTTP/1.1" 200 OK
+2025-07-02 17:38:19,833 - main - INFO - Received capture_image request for session session_iafq8rw99 with question: Help with a math problem
+2025-07-02 17:38:19,833 - main - INFO - Triggering camera capture for session session_iafq8rw99
+2025-07-02 17:38:35,149 - main - WARNING - Timeout waiting for image capture for session session_iafq8rw99
+INFO:     127.0.0.1:49445 - "POST /capture_image HTTP/1.1" 200 OK

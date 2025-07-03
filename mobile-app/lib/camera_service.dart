@@ -6,6 +6,7 @@ class CameraService {
   static CameraController? _controller;
   static bool _isInitialized = false;
   static bool _isInitializing = false;
+  static bool _isTakingPicture = false;
 
   /// Pre-initialize camera at app startup for faster picture taking
   static Future<void> initialize() async {
@@ -36,15 +37,26 @@ class CameraService {
 
   /// Fast picture capture using pre-initialized controller
   static Future<XFile> takePicture() async {
-    if (!_isInitialized) {
-      await initialize();
+    // Prevent multiple simultaneous picture captures
+    if (_isTakingPicture) {
+      throw Exception('Camera is already taking a picture. Please wait.');
     }
     
-    if (_controller == null || !_controller!.value.isInitialized) {
-      throw Exception('Camera not properly initialized');
-    }
+    _isTakingPicture = true;
+    
+    try {
+      if (!_isInitialized) {
+        await initialize();
+      }
+      
+      if (_controller == null || !_controller!.value.isInitialized) {
+        throw Exception('Camera not properly initialized');
+      }
 
-    return await _controller!.takePicture();
+      return await _controller!.takePicture();
+    } finally {
+      _isTakingPicture = false;
+    }
   }
 
   /// Compress image to reduce upload time and storage costs

@@ -11,6 +11,7 @@ from typing import Optional
 
 import base64
 import os
+import requests
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -67,7 +68,7 @@ if not firebase_admin._apps:
     try:
         # Look for service account key in various locations
         possible_paths = [
-            os.path.join(os.path.dirname(__file__), "hw-buddy-462818-firebase-adminsdk-fbsvc-962e1f8a4a.json"),
+            os.path.join(os.path.dirname(__file__), "..", "donotinclude", "hw-buddy-66d6b-firebase-adminsdk-fbsvc-ff539d97a4.json"),
             os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""),
         ]
         
@@ -144,7 +145,7 @@ async def capture_image(request: CaptureImageRequest):
         import asyncio
         import time
         
-        max_wait_time = 15  # seconds
+        max_wait_time = 25  # seconds - increased for mobile upload time
         poll_interval = 0.5  # seconds
         start_time = time.time()
         
@@ -154,19 +155,37 @@ async def capture_image(request: CaptureImageRequest):
             if session_doc.exists:
                 session_data = session_doc.to_dict()
                 
-                if session_data.get('latest_image_url') and session_data.get('latest_image_gcs_url'):
+                # Debug logging to see what's in the document
+                logger.info(f"Checking session data: command={session_data.get('command')}, has_image_url={bool(session_data.get('last_image_url'))}, has_gcs_url={bool(session_data.get('last_image_gcs_url'))}")
+                
+                if session_data.get('last_image_url') and session_data.get('last_image_gcs_url'):
                     logger.info(f"Image captured successfully for session {request.session_id}")
                     
-                    # Get base64 image data if available
-                    image_data = session_data.get('latest_image_data')  # Base64 encoded
+                    # Download image and convert to base64
+                    image_base64 = None
+                    try:
+                        image_url = session_data.get('last_image_url')
+                        logger.info(f"Downloading image from {image_url}")
+                        
+                        # Download the image
+                        img_response = requests.get(image_url, timeout=10)
+                        img_response.raise_for_status()
+                        
+                        # Convert to base64
+                        image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+                        logger.info(f"Image converted to base64, length: {len(image_base64)}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error downloading/converting image: {str(e)}")
+                        # Continue without base64 data
                     
                     response = CaptureImageResponse(
                         success=True,
                         message=f"Image captured successfully for session {request.session_id}",
                         session_id=request.session_id,
-                        image_url=session_data.get('latest_image_url'),
-                        image_gcs_url=session_data.get('latest_image_gcs_url'),
-                        image_data=image_data
+                        image_url=session_data.get('last_image_url'),
+                        image_gcs_url=session_data.get('last_image_gcs_url'),
+                        image_data=image_base64  # Now includes base64 data
                     )
                     logger.info(f"Returning successful image capture response for session {request.session_id}")
                     return response

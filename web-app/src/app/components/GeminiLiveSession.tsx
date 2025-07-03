@@ -243,18 +243,20 @@ Always be encouraging and supportive in your tutoring approach.`
           }]
         });
         
-        // If we have an image, send it to Gemini Live for analysis
-        if (result.success && result.image_gcs_url) {
+        // If we have an image with base64 data, send it to Gemini Live
+        if (result.success && result.image_data) {
           console.log('🎵 Sending image to Gemini Live for analysis');
+          console.log('🎵 Image base64 length:', result.image_data.length);
           
           try {
+            // Send image as inline data (base64 from backend)
             sessionRef.current.sendClientContent({
               turns: [{
                 role: 'user',
                 parts: [{
                   inlineData: {
                     mimeType: 'image/jpeg',
-                    data: result.image_data // Base64 encoded image data
+                    data: result.image_data
                   }
                 }, {
                   text: `I've captured an image of my homework. ${functionCall.args?.user_question || 'Please help me understand this.'} ${functionCall.args?.context || ''}`
@@ -266,6 +268,8 @@ Always be encouraging and supportive in your tutoring approach.`
           } catch (error) {
             console.error('🎵 Error sending image to Gemini Live:', error);
           }
+        } else if (result.success && !result.image_data) {
+          console.warn('🎵 Image captured but no base64 data available');
         }
       }
       
