@@ -35,6 +35,8 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const [currentMathJax, setCurrentMathJax] = useState('');
   const [websocketStatus, setWebsocketStatus] = useState('disconnected');
   const [processingStatus, setProcessingStatus] = useState('');
+  const [pendingFunctionCall, setPendingFunctionCall] = useState<{id: string, name: string} | null>(null);
+  const pendingFunctionCallRef = useRef<{id: string, name: string} | null>(null);
 
   // Debug logging for currentMathJax changes
   useEffect(() => {
@@ -151,7 +153,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       });
       
       const session = await client.live.connect({
-        model: 'gemini-2.5-flash-preview-native-audio-dialog',
+        model: 'gemini-2.0-flash-live-001',
         callbacks: {
           onopen: () => {
             setStatus('Connected! Ready to record.');
@@ -178,8 +180,8 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           outputAudioTranscription: {},
           tools: [{
             functionDeclarations: [{
-              name: "take_picture",
-              description: "Take a picture using the homework buddy camera system",
+              name: "get_expert_help",
+              description: "Get expert homework help by analyzing the student's work and providing tailored guidance",
               parameters: {
                 type: "object",
                 properties: {
@@ -195,10 +197,11 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           systemInstruction: {
             parts: [{
               text: "You are a homework buddy assistant. \
-              When a user asks you anything, first respond with affirmative that you can help and then ALWAYS call the take_picture function. \
-              Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
+              When a user asks you anything, first respond with affirmative that you can help and then in order to help them you must call the get_expert_help function. \
+              Pass the user's specific question or request as the 'user_ask' parameter to the get_expert_help function. \
               This function will analyze the student's progress and provide next steps specifically tailored to the user's request. Note: this can take some time. While waiting do not say anything. \
-              When a response returns, imply relay the function's response to the user, as it contains pointers to the student."
+              Do NOT supply help outside of the results of this function's result. \
+              When a response returns, simply relay the function's response to the user, as it contains pointers to the student."
             }]
           }
         },
@@ -385,23 +388,35 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       }
     }
     
-    // Send the help text to Gemini Live
-    if (responseData.success && helpText && sessionRef.current) {
-      console.log('🎵 Sending help text to Gemini Live');
+    // Send the tool response now that we have the helpText
+    // Gemini will then relay this response to the user
+    console.log("This is the pending function call that should have completed")
+    console.log("State:", pendingFunctionCall)
+    console.log("Ref:", pendingFunctionCallRef.current)
+    if (pendingFunctionCallRef.current && sessionRef.current) {
+      console.log('🔌 Sending delayed tool response with helpText:', helpText);
       
       try {
-        sessionRef.current.sendClientContent({
-          turns: [{
-            role: 'user',
-            parts: [{
-              text: `Help Text: ${helpText}`
-            }]
+        sessionRef.current.sendToolResponse({
+          functionResponses: [{
+            id: pendingFunctionCallRef.current.id,
+            name: pendingFunctionCallRef.current.name,
+            response: {
+              result: {
+                success: responseData.success,
+                message: helpText || "Analysis complete",
+                status: "completed"
+              }
+            }
           }]
         });
         
-        console.log('🎵 Help text sent to Gemini Live successfully');
+        // Clear the pending function call
+        setPendingFunctionCall(null);
+        pendingFunctionCallRef.current = null;
+        console.log('🔌 Tool response sent successfully');
       } catch (error) {
-        console.error('🎵 Error sending help text to Gemini Live:', error);
+        console.error('🔌 Error sending tool response:', error);
       }
     }
   };
@@ -414,10 +429,10 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       console.log('🎵 Function call received:', toolCall.functionCalls);
       
       for (const functionCall of toolCall.functionCalls) {
-        if (functionCall.name === 'take_picture') {
-          console.log('🎵 Executing take_picture function...');
+        if (functionCall.name === 'get_expert_help') {
+          console.log('🎵 Executing get_expert_help function...');
           setIsAnalyzingImage(true);
-          setStatus('📸 Preparing to take picture...');
+          setStatus('🤖 Getting expert help...');
           
           try {
             // Send WebSocket message instead of POST request
@@ -430,22 +445,14 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
               websocketRef.current.send(JSON.stringify(message));
               console.log('🔌 Sent process_query via WebSocket:', message);
               
-              // Send immediate response to Gemini to acknowledge the function call
-              if (sessionRef.current) {
-                sessionRef.current.sendToolResponse({
-                  functionResponses: [{
-                    id: functionCall.id,
-                    name: functionCall.name,
-                    response: {
-                      result: {
-                        success: true,
-                        message: "Processing your request via WebSocket...",
-                        status: "processing"
-                      }
-                    }
-                  }]
-                });
-              }
+              // Store the pending function call to respond to later when we get helpText
+              const pendingCall = {
+                id: functionCall.id || '',
+                name: functionCall.name
+              };
+              setPendingFunctionCall(pendingCall);
+              pendingFunctionCallRef.current = pendingCall;
+              console.log('🔌 Stored pending function call, will respond when helpText is received');
             } else {
               throw new Error('WebSocket not connected');
             }
@@ -470,6 +477,10 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                 }]
               });
             }
+            
+            // Clear any pending function call since we just sent the error response
+            setPendingFunctionCall(null);
+            pendingFunctionCallRef.current = null;
           }
         }
       }
