@@ -3,9 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Session, Modality } from '@google/genai';
 import { createBlob, decode, decodeAudioData } from '../utils/audio';
+import { EventParser, ADKEventData } from '../utils/eventParser';
 import { Navigation } from '@/components/ui/navigation';
 import { CentralStartButton } from '@/components/ui/central-start-button';
 import { ChatPanel } from '@/components/ui/chat-panel';
+import { ProcessingStatus } from './ProcessingStatus';
+import { MathJaxDisplay } from './MathJaxDisplay';
 
 interface GeminiLiveSessionProps {
   sessionId: string;
@@ -44,7 +47,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const inputGainRef = useRef<GainNode | null>(null);
   const outputGainRef = useRef<GainNode | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
-  const conversationEndRef = useRef<HTMLDivElement>(null);
+  // Removed conversationEndRef as we're not auto-scrolling chat anymore
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
   const websocketRef = useRef<WebSocket | null>(null);
@@ -56,9 +59,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
     };
   }, []);
 
-  useEffect(() => {
-    conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [conversation]);
+  // Removed auto-scroll for conversation to focus on MathJax display
 
   const cleanup = () => {
     if (mediaStreamRef.current) {
@@ -252,25 +253,38 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         
       case 'adk_event':
         console.log('🔌 ADK Event:', message.event_type, message.data);
-        console.log('🔌 ADK Event - function_call:', message.data.function_call);
-        console.log('🔌 ADK Event - function_response:', message.data.function_response);
-        console.log('🔌 ADK Event - has_text_content:', message.data.has_text_content);
-        console.log('🔌 ADK Event - is_final:', message.data.is_final);
         
-        // Handle specific ADK events and update processingStatus
-        if (message.data.function_call) {
-          console.log('🔌 Setting status: Taking picture...');
-          setProcessingStatus("📸 Taking picture of your homework...");
-        } else if (message.data.function_response) {
-          console.log('🔌 Setting status: Analyzing image...');
-          setProcessingStatus("🧠 Analyzing the image with AI...");
-        } else if (message.data.has_text_content && message.data.is_final) {
-          console.log('🔌 Setting status: Analysis complete...');
-          setProcessingStatus("✅ Analysis complete!");
-        } else if (message.data.has_text_content) {
-          console.log('🔌 Setting status: AI thinking...');
-          setProcessingStatus("🤔 AI is thinking and preparing response...");
+        // Use EventParser to handle the event
+        const eventData: ADKEventData = {
+          event_id: message.data.event_id || '',
+          author: message.data.author || '',
+          timestamp: message.data.timestamp || 0,
+          is_final: message.data.is_final || false,
+          function_call: message.data.function_call,
+          function_response: message.data.function_response,
+          has_text_content: message.data.has_text_content,
+          content: message.data.content
+        };
+        
+        const parseResult = EventParser.parseEvent(eventData);
+        
+        // Apply the parsing results
+        if (parseResult.processingStatus) {
+          setProcessingStatus(parseResult.processingStatus);
         }
+        
+        if (parseResult.shouldUpdateMathJax && parseResult.mathJaxContent) {
+          console.log('🔌 Updating MathJax from EventParser:', parseResult.mathJaxContent);
+          setCurrentMathJax(parseResult.mathJaxContent);
+        }
+        
+        if (parseResult.clearProcessingStatus) {
+          // Clear processing status after a delay
+          setTimeout(() => {
+            setProcessingStatus('');
+          }, 2000);
+        }
+        
         break;
         
       case 'final_response':
@@ -669,17 +683,28 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           />
         )}
         
-        {/* Chat Panel - Full Width */}
-        {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording) && (
-          <ChatPanel
-            conversation={conversation}
-            currentUserMessage={currentUserMessage}
-            currentAssistantMessage={currentAssistantMessage}
-            lastImageUrl={lastImageUrl}
-            isAnalyzingImage={isAnalyzingImage}
-            currentMathJax={currentMathJax}
-            processingStatus={processingStatus}
-          />
+        {/* Main Content - Show when there's activity */}
+        {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording || currentMathJax) && (
+          <div className="space-y-8">
+            {/* MathJax Display - Front and Center */}
+            <MathJaxDisplay content={currentMathJax} />
+            
+            {/* Processing Status - Below MathJax */}
+            <ProcessingStatus status={processingStatus} />
+            
+            {/* Chat Panel - Hidden by default, can be toggled if needed */}
+            <div className="hidden">
+              <ChatPanel
+                conversation={conversation}
+                currentUserMessage={currentUserMessage}
+                currentAssistantMessage={currentAssistantMessage}
+                lastImageUrl={lastImageUrl}
+                isAnalyzingImage={isAnalyzingImage}
+                currentMathJax={currentMathJax}
+                processingStatus={processingStatus}
+              />
+            </div>
+          </div>
         )}
       </div>
     </div>

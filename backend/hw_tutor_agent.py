@@ -192,7 +192,7 @@ class HWTutorAgent:
         
         # Create the main tutoring agent
         self.state_establisher_agent = LlmAgent(
-            name="HWTutorAgent",
+            name="StateEstablisher",
             model="gemini-2.5-flash",
             tools=[self.take_picture_tool],
             before_model_callback=inject_image_callback,
@@ -255,6 +255,10 @@ class HWTutorAgent:
                 for part in event.content.parts:
                     if hasattr(part, 'text') and part.text:
                         event_data["has_text_content"] = True
+                        # Include the actual content for parsing
+                        if not event_data.get("content"):
+                            event_data["content"] = {"parts": []}
+                        event_data["content"]["parts"].append({"text": part.text})
                         break
             
             # Send the processed event data

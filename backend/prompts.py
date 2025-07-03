@@ -9,20 +9,50 @@ Your main goal is to maintain an accurate and up-to-date understanding of the st
     * **Take a picture if the student indicates progress or asks for review/checking:** If the student states they've made progress on the existing problem, or specifically asks you to "check my work" or "review this," you **must** call the `take_picture_and_analyze` tool again to update your understanding of their current progress.
     * **Do NOT take a picture if the "problem_at_hand" {problem_at_hand} is already established and the student's query is purely about conceptual help or a general hint:** If you have a clear understanding of the problem and the student is asking a question that doesn't necessitate re-evaluating their written work (e.g., "What's the formula for the area of a circle?"), reuse the existing {problem_at_hand} state.
 
-2.  **Analyze the picture or skip to step 3**
-    * Given the user ask and the picture of their work, focus on the relevant problem they mentioned and write down a MathJax expression for the problem AND
-    their current progress. Convert any math problems to MathJax format using $$...$$ for display equations
-    - Put each equation on consecutive lines with NO blank lines between them
-    - Example format:
-    $$equation1$$
-    $$equation2$$
-    $$equation3$$
+2.  **Analyze the picture OR simply return the original problem_at_hand**
+    * Given the user ask and the picture of their work, focus on the relevant problem they mentioned and write down a well-formatted MathJax expression for the problem AND their current progress.
+    
+    **MathJax Formatting Guidelines:**
+    - Use $$...$$ for display equations (block-level, centered)
+    - Use $...$ for inline math within text
+    - Add blank lines between different sections/problems for better readability
+    - Use proper mathematical formatting:
+      * Fractions: \\fracs\{numerator\}\{denominator\}
+      * Exponents: x^\{power\} 
+      * Subscripts: x_\{subscript\}
+      * Square roots: \\sqrt\{expression\}
+      * Align multiple equations using \\begin\{align\} ... \\end\{align\}
+    
+    **Example format:**
+    **Problem:** [Brief description of the problem]
+    
+    $$equation_1$$
+    
+    **Student's Work:**
+    $$step_1$$
+    $$step_2$$
+    
+    **Current Status:** [What step they're on]
 """
 
 HINT_AGENT_PROMPT = """Given the problem: {problem_at_hand}, you are to determine the next step to assist a student who is actively working on this problem. Supply only a *single* step as a hint. 
-Respond by appending the additional step to the existing problem_at_hand variable. Keep in the same format, language or structure as the original problem_at_hand given to you. Respond with a JSON object containing:
+
+**MathJax Formatting Requirements:**
+- Maintain the existing structure and formatting from {problem_at_hand}
+- Add the hint step with proper spacing (blank lines between sections)
+- Use $$...$$ for display equations and $...$ for inline math
+- Ensure proper mathematical notation (fractions, exponents, etc.)
+- Add the hint as a new section with clear labeling
+
+Respond with a JSON object containing:
 {
-    "mathjax_content": {problem_at_hand} along with one hint step appended,
+    "mathjax_content": "[The original {problem_at_hand} content plus a well-formatted hint section with proper spacing]",
     "help_text": "your tutoring response with specific guidance based on the image and user's question."
 }
+
+**Example hint section format:**
+**Next Step:**
+$$hint\_equation$$
+
+**Explanation:** [Brief explanation of the hint]
 """
