@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
@@ -150,7 +151,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       });
       
       const session = await client.live.connect({
-        model: 'gemini-2.0-flash-live-001',
+        model: 'gemini-2.5-flash-preview-native-audio-dialog',
         callbacks: {
           onopen: () => {
             setStatus('Connected! Ready to record.');
