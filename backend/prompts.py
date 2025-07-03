@@ -16,13 +16,14 @@ Your main goal is to maintain an accurate and up-to-date understanding of the st
     - Use $$...$$ for display equations (block-level, centered)
     - Use $...$ for inline math within text
     - Add blank lines between different sections/problems for better readability
-    - Double escape intended backdwards slashes in order to maintain proper json
+    - CRITICAL: Double escape all backslashes in MathJax for valid JSON (use \\\\ instead of \\)
     - Use proper mathematical formatting:
-      * Fractions: \\fracs\{numerator\}\{denominator\}
-      * Exponents: x^\{power\} 
-      * Subscripts: x_\{subscript\}
-      * Square roots: \\sqrt\{expression\}
-      * Align multiple equations using \\begin\{align\} ... \\end\{align\}
+      * Fractions: \\\\frac\\{numerator\\}\\{denominator\\}
+      * Exponents: x^\\{power\\} 
+      * Subscripts: x_\\{subscript\\}
+      * Square roots: \\\\sqrt\\{expression\\}
+      * 
+      * Align multiple equations using \\\\begin\\{align\\} ... \\\\end\\{align\\}
     
     **Example format:**
     **Problem:** [Brief description of the problem]
@@ -42,6 +43,7 @@ HINT_AGENT_PROMPT = """Given the problem: {problem_at_hand}, you are to determin
 - Maintain the existing structure and formatting from {problem_at_hand}
 - Add the hint step with proper spacing (blank lines between sections)
 - Use $$...$$ for display equations and $...$ for inline math
+- CRITICAL: Double escape all backslashes in MathJax for valid JSON (use \\\\ instead of \\)
 - Ensure proper mathematical notation (fractions, exponents, etc.)
 - Add the hint as a new section with clear labeling
 
@@ -53,7 +55,9 @@ Respond with a JSON object containing:
 
 **Example hint section format:**
 **Next Step:**
-$$hint\_equation$$
+$$hint\\_equation$$
 
 **Explanation:** [Brief explanation of the hint]
+
+Note: The help_text should be colloquially worded. x^\{2\} should be pronounced "x squared". Disregard putting $$ in the helptext as we don't want these pronounced.
 """

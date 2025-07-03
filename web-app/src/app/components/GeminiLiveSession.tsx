@@ -194,10 +194,10 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
           systemInstruction: {
             parts: [{
               text: "You are a homework buddy assistant. \
-              When a user asks you anything, first respond with affirmative that you can help and then ALWAYS call the take_picture function. This will analyze the student's work and return with a reply. \
+              When a user asks you anything, first respond with affirmative that you can help and then ALWAYS call the take_picture function. \
               Pass the user's specific question or request as the 'user_ask' parameter to the take_picture function. \
-              This function will analyze the student's progress and provide next steps specifically tailored to the user's request. Note: this can take some time. \
-              Simply relay the function's response to the user, as it contains pointers to the student."
+              This function will analyze the student's progress and provide next steps specifically tailored to the user's request. Note: this can take some time. While waiting do not say anything. \
+              When a response returns, imply relay the function's response to the user, as it contains pointers to the student."
             }]
           }
         },
@@ -304,7 +304,9 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         
         if (parseResult.shouldUpdateMathJax && parseResult.mathJaxContent) {
           console.log('🔌 Updating MathJax from EventParser:', parseResult.mathJaxContent);
-          setCurrentMathJax(parseResult.mathJaxContent);
+          const normalizedMathJax = normalizeMathJaxBackslashes(parseResult.mathJaxContent);
+          console.log('🔌 Setting MathJax content (normalized):', normalizedMathJax);
+          setCurrentMathJax(normalizedMathJax);
         }
         
         if (parseResult.clearProcessingStatus) {
@@ -324,6 +326,21 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
       default:
         console.log('🔌 Unknown message type:', message.type);
     }
+  };
+
+  const normalizeMathJaxBackslashes = (text: string): string => {
+    // Function to normalize backslashes within MathJax expressions to single backslashes
+    const normalizeContent = (_match: string, content: string): string => {
+      // Replace multiple backslashes with single backslashes
+      const normalizedContent = content.replace(/\\+/g, '\\');
+      return `$$${normalizedContent}$$`;
+    };
+    
+    // Find all MathJax expressions ($$...$$) and normalize backslashes within them
+    const result = text.replace(/\$\$(.*?)\$\$/g, normalizeContent);
+    console.log('🔧 normalizeMathJaxBackslashes input:', text);
+    console.log('🔧 normalizeMathJaxBackslashes output:', result);
+    return result;
   };
 
   const handleFinalResponse = (responseData: any) => {
@@ -353,8 +370,10 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
         
         // Update MathJax content if available
         if (parsedAnalysis.mathjax_content) {
-          console.log('🎵 Setting MathJax content:', parsedAnalysis.mathjax_content);
-          setCurrentMathJax(parsedAnalysis.mathjax_content);
+          // Normalize backslashes for proper MathJax rendering
+          const normalizedMathJax = normalizeMathJaxBackslashes(parsedAnalysis.mathjax_content);
+          console.log('🎵 Setting MathJax content (normalized):', normalizedMathJax);
+          setCurrentMathJax(normalizedMathJax);
         } else {
           console.log('🎵 No MathJax content found in response');
         }

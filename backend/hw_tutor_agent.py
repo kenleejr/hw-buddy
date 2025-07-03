@@ -56,6 +56,20 @@ def fix_malformed_json(json_str: str) -> str:
     return fixed_json
 
 
+def escape_mathjax_backslashes(text: str) -> str:
+    """
+    Escape backslashes in MathJax expressions (content between $$...$$) for valid JSON.
+    """
+    def replace_backslashes(match):
+        content = match.group(1)
+        # Escape all backslashes in the MathJax content
+        escaped_content = content.replace('\\', '\\\\')
+        return f'$${escaped_content}$$'
+    
+    # Find all MathJax expressions ($$...$$) and escape backslashes within them
+    return re.sub(r'\$\$(.*?)\$\$', replace_backslashes, text, flags=re.DOTALL)
+
+
 def clean_agent_response(response_text: str) -> str:
     """
     Clean the agent response by removing common markdown formatting.
@@ -75,6 +89,9 @@ def clean_agent_response(response_text: str) -> str:
     cleaned = re.sub(r'\s*```$', '', cleaned)
     
     cleaned = cleaned.strip()
+    
+    # Escape backslashes in MathJax expressions for valid JSON
+    cleaned = escape_mathjax_backslashes(cleaned)
     
     # Try to parse and re-encode as JSON to fix any formatting issues
     try:
