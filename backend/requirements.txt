@@ -6,3 +6,7 @@ google-adk
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-sdk
 pydantic
+websockets
+python-dotenv
+requests
+aiohttp

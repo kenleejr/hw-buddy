@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import { GoogleGenAI, LiveServerMessage, Session, Modality } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Session, Modality, Type } from '@google/genai';
 import { createBlob, decode, decodeAudioData } from '../utils/audio';
 import { Navigation } from '@/components/ui/navigation';
 import { CentralStartButton } from '@/components/ui/central-start-button';
@@ -29,6 +29,7 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [currentMathJax, setCurrentMathJax] = useState('');
+  const [lastTakePictureTime, setLastTakePictureTime] = useState(0);
 
   // Debug logging for currentMathJax changes
   useEffect(() => {
@@ -148,20 +149,19 @@ export function GeminiLiveSession({ sessionId, onEndSession }: GeminiLiveSession
                 name: "take_picture",
                 description: "Take a picture of the student's homework or workspace to better understand what they're working on",
                 parameters: {
-                  type: "object",
+                  type: Type.OBJECT,
                   properties: {
                     user_question: {
-                      type: "string",
+                      type: Type.STRING,
                       description: "The student's specific question or what they need help with"
                     },
                     context: {
-                      type: "string",
+                      type: Type.STRING,
                       description: "Additional context about what the student is studying or working on"
                     }
                   },
                   required: ["user_question"]
-                },
-                behavior: "NON_BLOCKING"
+                }
               }]
             }
           ],
@@ -198,6 +198,14 @@ Always be encouraging and supportive in your tutoring approach.`
 
   const handleTakePictureAsync = async (functionCall: any, sessionId: string) => {
     try {
+      // Debounce: prevent multiple calls within 5 seconds
+      const now = Date.now();
+      if (now - lastTakePictureTime < 5000) {
+        console.log('🎵 Debouncing take_picture call - too soon since last call');
+        return;
+      }
+      setLastTakePictureTime(now);
+      
       console.log('🎵 Taking picture asynchronously...');
       
       // Call the simplified backend endpoint to trigger image capture
@@ -239,7 +247,7 @@ Always be encouraging and supportive in your tutoring approach.`
                 image_gcs_url: result.image_gcs_url || null
               }
             },
-            scheduling: "INTERRUPT" // Interrupt current response to provide image context
+            // scheduling: "INTERRUPT" // Interrupt current response to provide image context
           }]
         });
         
@@ -288,7 +296,7 @@ Always be encouraging and supportive in your tutoring approach.`
                 message: `Error taking picture: ${error instanceof Error ? error.message : 'Unknown error'}`
               }
             },
-            scheduling: "WHEN_IDLE" // Don't interrupt current response for errors
+            // scheduling: "WHEN_IDLE" // Don't interrupt current response for errors
           }]
         });
       }
@@ -401,7 +409,7 @@ Always be encouraging and supportive in your tutoring approach.`
     
     // Handle output transcription (assistant speech)
     if (message.serverContent?.outputTranscription?.text) {
-      setCurrentAssistantMessage(prev => prev + message.serverContent.outputTranscription.text);
+      setCurrentAssistantMessage(prev => prev + message.serverContent!.outputTranscription!.text);
     }
     
     // Handle text content from assistant (non-audio responses)
@@ -433,9 +441,9 @@ Always be encouraging and supportive in your tutoring approach.`
         }
       
       await inputAudioContextRef.current.resume();
-      await outputAudioContextRef.current.resume();
+      await outputAudioContextRef.current?.resume();
       
-      console.log('🎵 Audio contexts resumed - Input:', inputAudioContextRef.current.state, 'Output:', outputAudioContextRef.current.state);
+      console.log('🎵 Audio contexts resumed - Input:', inputAudioContextRef.current.state, 'Output:', outputAudioContextRef.current?.state);
       
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       mediaStreamRef.current = stream;

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import QRCode from "react-qr-code";
-import { GeminiLiveSession } from "./components/GeminiLiveSession";
+import { WebSocketGeminiSession } from "./components/WebSocketGeminiSession";
 import { Navigation } from "@/components/ui/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -45,7 +45,7 @@ export default function Home() {
 
   if (isSessionActive) {
     return (
-      <GeminiLiveSession 
+      <WebSocketGeminiSession 
         sessionId={sessionId}
         onEndSession={handleEndSession}
       />

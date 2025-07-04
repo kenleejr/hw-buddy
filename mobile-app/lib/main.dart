@@ -13,6 +13,8 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 
 import 'firebase_options.dart';
 import 'camera_service.dart';
+import 'websocket_service.dart';
+import 'http_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,8 +53,10 @@ class SessionModel extends ChangeNotifier {
   bool _isSessionActive = false;
   String _statusMessage = 'Ready';
   StreamSubscription? _sessionSubscription;
+  StreamSubscription? _wsSubscription;
   bool _isScanning = false;
   bool _isProcessingImage = false;
+  WebSocketService? _webSocketService;
 
   String? get sessionId => _sessionId;
   bool get isSessionActive => _isSessionActive;
@@ -71,12 +75,14 @@ class SessionModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void startSessionWithId(String sessionId) {
+  Future<void> startSessionWithId(String sessionId) async {
     _sessionId = sessionId;
     _isSessionActive = true;
     _isScanning = false;
-    _statusMessage = 'Listening for commands...';
+    _statusMessage = 'Connecting to session...';
+    notifyListeners();
 
+    // Initialize Firestore session
     FirebaseFirestore.instance.collection('sessions').doc(_sessionId).set({
       'status': 'ready',
       'command': 'none',
@@ -84,6 +90,7 @@ class SessionModel extends ChangeNotifier {
       'last_image_gcs_url': '',
     });
 
+    // Set up Firestore listener (keep for backward compatibility)
     _sessionSubscription = FirebaseFirestore.instance
         .collection('sessions')
         .doc(_sessionId)
@@ -92,10 +99,34 @@ class SessionModel extends ChangeNotifier {
       if (snapshot.exists) {
         final data = snapshot.data() as Map<String, dynamic>;
         if (data['command'] == 'take_picture') {
-          takePictureAndUpload();
+          if (!_isProcessingImage) {
+            takePictureAndUpload();
+          } else {
+            print('Already processing an image, ignoring new take_picture command');
+          }
         }
       }
     });
+
+    // Try to connect to WebSocket (optional enhancement)
+    try {
+      _webSocketService = WebSocketService();
+      final wsConnected = await _webSocketService!.connect(sessionId);
+      
+      if (wsConnected) {
+        _statusMessage = 'Connected via WebSocket - Listening for commands...';
+        
+        // Listen to WebSocket messages
+        _wsSubscription = _webSocketService!.messageStream.listen((message) {
+          _handleWebSocketMessage(message);
+        });
+      } else {
+        _statusMessage = 'Connected via Firestore - Listening for commands...';
+      }
+    } catch (e) {
+      print('WebSocket connection failed, using Firestore only: $e');
+      _statusMessage = 'Connected via Firestore - Listening for commands...';
+    }
 
     notifyListeners();
   }
@@ -120,7 +151,11 @@ class SessionModel extends ChangeNotifier {
       if (snapshot.exists) {
         final data = snapshot.data() as Map<String, dynamic>;
         if (data['command'] == 'take_picture') {
-          takePictureAndUpload();
+          if (!_isProcessingImage) {
+            takePictureAndUpload();
+          } else {
+            print('Already processing an image, ignoring new take_picture command');
+          }
         }
       }
     });
@@ -128,11 +163,35 @@ class SessionModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _handleWebSocketMessage(Map<String, dynamic> message) {
+    print('Received WebSocket message: ${message['type']}');
+    
+    switch (message['type']) {
+      case 'session_joined':
+        print('Successfully joined WebSocket session');
+        break;
+      case 'image_received':
+        print('Image upload acknowledged by server');
+        break;
+      default:
+        print('Unknown WebSocket message type: ${message['type']}');
+    }
+  }
+
   void stopSession() {
     _sessionSubscription?.cancel();
+    _wsSubscription?.cancel();
+    _webSocketService?.disconnect();
     _isSessionActive = false;
     _sessionId = null;
+    _isProcessingImage = false; // Reset processing flag
     _statusMessage = 'Ready';
+    notifyListeners();
+  }
+  
+  void resetProcessingFlag() {
+    _isProcessingImage = false;
+    _statusMessage = 'Listening for commands...';
     notifyListeners();
   }
 
@@ -146,6 +205,16 @@ class SessionModel extends ChangeNotifier {
     _isProcessingImage = true;
     _statusMessage = 'Taking picture...';
     notifyListeners();
+    
+    // Add timeout to prevent flag from getting stuck
+    Timer(Duration(seconds: 30), () {
+      if (_isProcessingImage) {
+        print('Image processing timeout - resetting flag');
+        _isProcessingImage = false;
+        _statusMessage = 'Listening for commands...';
+        notifyListeners();
+      }
+    });
 
     try {
       // Use pre-initialized camera service for fast capture
@@ -154,34 +223,41 @@ class SessionModel extends ChangeNotifier {
       _statusMessage = 'Compressing image...';
       notifyListeners();
       
-      // Compress image to reduce upload time and storage costs
+      // Compress image to reduce upload time
       final compressedImage = await CameraService.compressImage(image.path);
 
-      _statusMessage = 'Uploading image...';
+      _statusMessage = 'Uploading image directly to backend...';
       notifyListeners();
 
-      final fileName = 'images/$_sessionId/${DateTime.now().toIso8601String()}.jpg';
-      final storageRef = FirebaseStorage.instance.ref().child(fileName);
-      await storageRef.putFile(compressedImage);
-      final downloadURL = await storageRef.getDownloadURL();
-      
-      // Get the bucket name from Firebase Storage
-      final bucket = storageRef.bucket;
-      final gcsUrl = 'gs://$bucket/$fileName';
+      // Upload directly to backend via HTTP
+      final uploadResult = await HttpService.uploadImage(
+        sessionId: _sessionId!,
+        imageFile: compressedImage,
+        userQuestion: 'Please help me with my homework',
+      );
 
-      _statusMessage = 'Processing...';
-      notifyListeners();
+      if (uploadResult['success'] == true) {
+        _statusMessage = 'Processing...';
+        notifyListeners();
 
-      await FirebaseFirestore.instance
-          .collection('sessions')
-          .doc(_sessionId)
-          .update({
-        'last_image_url': downloadURL,
-        'last_image_gcs_url': gcsUrl,
-        'command': 'done',
-      });
+        // Update Firestore to indicate image was uploaded
+        await FirebaseFirestore.instance
+            .collection('sessions')
+            .doc(_sessionId)
+            .update({
+          'command': 'image_uploaded',
+          'timestamp': firestore.SERVER_TIMESTAMP,
+        });
 
-      _statusMessage = 'Listening for commands...';
+        // Notify via WebSocket if connected
+        if (_webSocketService?.isConnected == true) {
+          _webSocketService!.sendImageUploadNotification(_sessionId!);
+        }
+
+        _statusMessage = 'Image uploaded successfully - Listening for commands...';
+      } else {
+        throw Exception(uploadResult['error'] ?? 'Upload failed');
+      }
     } catch (e) {
       _statusMessage = 'Error: Could not upload photo - $e';
       print('Error in takePictureAndUpload: $e');

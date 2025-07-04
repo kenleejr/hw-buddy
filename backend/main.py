@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import firebase_admin
@@ -12,10 +12,14 @@ from typing import Optional
 import base64
 import os
 import requests
+from dotenv import load_dotenv
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk import trace as trace_sdk
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry import trace
+
+# Load environment variables from root project directory
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Load sensitive values from environment variables
 WANDB_BASE_URL = "https://trace.wandb.ai"
@@ -54,9 +58,12 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="HW Buddy Backend", version="1.0.0")
 
+# Get CORS origins from environment
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,9 +74,11 @@ if not firebase_admin._apps:
     # Try to use service account key if available, otherwise use default credentials
     try:
         # Look for service account key in various locations
+        google_creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
         possible_paths = [
-            os.path.join(os.path.dirname(__file__), "..", "donotinclude", "hw-buddy-66d6b-firebase-adminsdk-fbsvc-ff539d97a4.json"),
-            os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""),
+            os.path.join(os.path.dirname(__file__), "..", "donotinclude", "hw-buddy-66d6b-firebase-adminsdk-fbsvc-78a283697a.json"),
+            os.path.join(os.path.dirname(__file__), google_creds_path) if google_creds_path else "",
+            google_creds_path,
         ]
         
         cred = None
@@ -87,6 +96,10 @@ if not firebase_admin._apps:
         print(f"Warning: Could not initialize Firebase Admin SDK: {e}")
 
 db = firestore.client()
+
+def get_db():
+    """Get the Firestore database client"""
+    return db
 
 
 
@@ -235,10 +248,65 @@ async def take_picture(request: TakePictureRequest):
     
     return response
 
+@app.post("/upload_image")
+async def upload_image(
+    session_id: str = Form(...),
+    user_question: str = Form(default="Please help me with my homework"),
+    image: UploadFile = File(...)
+):
+    """
+    Direct image upload endpoint for mobile clients.
+    Receives image data directly and stores it temporarily for processing.
+    """
+    logger.info(f"Received direct image upload for session {session_id}")
+    
+    try:
+        # Validate image file
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Read image data
+        image_data = await image.read()
+        
+        # Convert to base64 for processing
+        image_base64 = base64.b64encode(image_data).decode('utf-8')
+        
+        # Store in session state (in-memory for now, could use Redis for production)
+        session_ref = db.collection('sessions').document(session_id)
+        
+        # Update session with image data
+        session_ref.update({
+            'last_image_data': image_base64,
+            'last_image_filename': image.filename,
+            'last_image_content_type': image.content_type,
+            'user_question': user_question,
+            'command': 'image_uploaded',
+            'timestamp': firestore.SERVER_TIMESTAMP
+        })
+        
+        logger.info(f"Image uploaded successfully for session {session_id}, size: {len(image_data)} bytes")
+        
+        return {
+            "success": True,
+            "message": f"Image uploaded successfully for session {session_id}",
+            "session_id": session_id,
+            "image_size": len(image_data),
+            "content_type": image.content_type
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading image for session {session_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # Get port and host from environment
+    port = int(os.getenv("BACKEND_PORT", 8000))
+    host = os.getenv("BACKEND_HOST", "0.0.0.0")
+    
+    uvicorn.run(app, host=host, port=port)
