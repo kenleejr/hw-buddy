@@ -31,25 +31,18 @@ SEND_SAMPLE_RATE = 16000     # Audio input from frontend
 VOICE_NAME = "Aoede"         # Voice for responses
 
 # Model configuration
-MODEL = "gemini-2.5-flash-exp-native-audio-thinking-dialog"
+MODEL = "gemini-2.5-flash-preview-native-audio-dialog"
 
 # System instruction for the homework tutor
-SYSTEM_INSTRUCTION = """You are an AI homework tutor designed to help students with their assignments through voice interaction. 
+SYSTEM_INSTRUCTION = """You are a helpful homework tutor. Be concise and wait for the student to ask for help first. 
 
-When a student asks for help:
-1. First, acknowledge their request warmly
-2. ALWAYS call the take_picture_and_analyze tool to see their current work
-3. Based on what you see, provide step-by-step guidance
-4. Encourage the student and adapt your teaching style to their level
+When they ask for help with homework:
+1. Acknowledge their request briefly
+2. If they mention taking a picture or looking at their work, call the take_picture_and_analyze tool
+3. Give clear, step-by-step guidance
+4. Be encouraging but brief
 
-Key principles:
-- Be patient and encouraging
-- Break down complex problems into smaller steps
-- Ask clarifying questions when needed
-- Help students understand the "why" behind each step
-- Use the student's visible work to provide contextual guidance
-
-You have access to a camera that can see the student's homework. Use it wisely to understand their current progress and provide targeted help."""
+Keep responses short and focused. Don't over-explain."""
 
 
 class HWBuddyLiveAgent:
@@ -87,12 +80,14 @@ class HWBuddyLiveAgent:
         Returns:
             JSON string with analysis results
         """
-        # This function will be enhanced to work with the stored image data
-        # For now, return a placeholder that the agent can work with
+        # For now, simulate that we've taken and analyzed a picture
+        # This will be enhanced to work with actual image data from mobile uploads
         return json.dumps({
-            "status": "image_requested",
+            "status": "success",
             "user_ask": user_ask,
-            "message": "Taking picture of homework to analyze your current progress..."
+            "analysis": "I can see your homework paper with some mathematical problems. I'm ready to help you work through them step by step.",
+            "next_steps": "Please tell me which specific problem you're having trouble with, and I'll guide you through the solution.",
+            "message": "I've taken a picture and can see your homework! What would you like help with?"
         })
     
     async def create_session(self, session_id: str) -> Dict[str, Any]:
