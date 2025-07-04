@@ -403,6 +403,9 @@ export class BackendAudioClient {
 
       this.websocket.onopen = () => {
         clearTimeout(timeout);
+        console.log('🔌 WebSocket connected');
+        this.isConnected = true;
+        this.onConnectionChange?.(true);
         resolve();
       };
 

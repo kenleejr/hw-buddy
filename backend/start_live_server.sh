@@ -26,6 +26,11 @@ if [ -z "$VIRTUAL_ENV" ]; then
     source .venv/bin/activate
 fi
 
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
 # Check if required environment variables are set
 if [ -z "$GOOGLE_CLOUD_PROJECT" ] && [ -z "$GOOGLE_AI_API_KEY" ]; then
     echo "⚠️  Please set GOOGLE_CLOUD_PROJECT and GOOGLE_AI_API_KEY in .env"

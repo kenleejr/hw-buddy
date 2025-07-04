@@ -31,7 +31,7 @@ SEND_SAMPLE_RATE = 16000     # Audio input from frontend
 VOICE_NAME = "Aoede"         # Voice for responses
 
 # Model configuration
-MODEL = "gemini-2.0-flash-live-preview-04-09"
+MODEL = "gemini-2.5-flash-exp-native-audio-thinking-dialog"
 
 # System instruction for the homework tutor
 SYSTEM_INSTRUCTION = """You are an AI homework tutor designed to help students with their assignments through voice interaction. 
