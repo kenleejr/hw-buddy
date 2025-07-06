@@ -38,7 +38,7 @@ This is the updated backend implementation using Google's ADK Live API for real-
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
+### 1. Backend Setup
 ```bash
 cd backend
 uv sync
@@ -51,7 +51,7 @@ cp .env.example .env
 # Edit .env with your Google Cloud and API credentials
 ```
 
-### 3. Start the Server
+### 3. Start the Backend Server
 ```bash
 ./start_live_server.sh
 ```
@@ -60,6 +60,26 @@ Or manually:
 ```bash
 python main_live.py
 ```
+
+### 4. Frontend Setup
+```bash
+cd ../web-app
+npm install
+npm run dev
+```
+
+### 5. Mobile App Setup (Automated)
+```bash
+cd ../mobile-app
+./run_mobile_app.sh
+```
+
+The mobile script will automatically:
+- Detect your local IP address
+- Update mobile app configuration
+- Fix CocoaPods dependencies
+- Test backend connectivity
+- Build and run the mobile app
 
 ## 📡 API Endpoints
 
@@ -170,15 +190,65 @@ Reason: "Session already has active connection"
 
 ## 📱 Mobile App Integration
 
-The mobile app should now upload images directly:
+### Automated Setup with `run_mobile_app.sh`
+
+The mobile app now includes an automated setup script that handles all configuration:
+
+```bash
+cd mobile-app
+./run_mobile_app.sh
+```
+
+#### What the script does:
+1. **🔍 Auto-detects local IP address** using multiple detection methods
+2. **📝 Updates main.dart** with correct backend URL (`http://YOUR_IP:8000`)
+3. **🧹 Cleans Flutter environment** and resolves dependency conflicts
+4. **🔄 Fixes CocoaPods sync** issues (removes Pods, reinstalls cleanly)
+5. **🔌 Tests backend connectivity** before proceeding
+6. **📱 Offers multiple run options**:
+   - Direct device/simulator run
+   - Build and open in Xcode
+   - Build-only for manual testing
+
+#### Manual Mobile Setup (if needed):
+```bash
+# 1. Update dependencies
+flutter pub get
+
+# 2. Fix CocoaPods (iOS)
+cd ios
+rm -rf Pods Podfile.lock
+pod install
+cd ..
+
+# 3. Update IP in main.dart
+# Change BACKEND_URL to your local IP address
+
+# 4. Run app
+flutter run --debug
+```
+
+### Direct HTTP Upload
+
+The mobile app now uploads images directly to the backend:
 
 ```http
 POST /sessions/{session_id}/upload_image
 Content-Type: multipart/form-data
 
 file: <image_file>
-user_ask: "What's the next step in this problem?"
+user_ask: "Please help me with this homework problem"
 ```
+
+#### Performance Improvements:
+- **Before**: Mobile → Firebase Storage → Firestore → Backend (~2-3 seconds)
+- **After**: Mobile → Direct HTTP → Backend (~200-500ms)
+
+#### Mobile App Features:
+- **QR Code Scanning**: Connects to web app sessions automatically
+- **Direct Upload**: HTTP POST directly to backend for minimal latency
+- **Status Updates**: Real-time feedback during image processing
+- **Error Handling**: Graceful failure recovery and retry logic
 
 ## 🔍 Debugging
 
@@ -209,6 +279,11 @@ INFO - Cancelled agent session task for session_abc123
 2. **Connection Failures**: Ensure backend is running and WebSocket endpoint is accessible
 3. **Audio Issues**: Check sample rates (16kHz input, 24kHz output) and PCM format
 4. **Session Issues**: Verify session ID format and that sessions are properly created before WebSocket connection
+5. **Mobile App Issues**:
+   - **CocoaPods sync error**: Run `./run_mobile_app.sh` to auto-fix
+   - **Connection timeout**: Verify IP address and network connectivity
+   - **Upload failures**: Check backend logs for HTTP 500 errors
+   - **Permission issues**: Ensure camera permissions are granted
 
 ## 🔄 Migration from Original Backend
 
@@ -332,3 +407,33 @@ curl -X POST \
 2. Connect to a session via WebSocket
 3. Try connecting again with same session ID
 4. Verify second connection is rejected with code 1008
+
+### Testing Mobile App Integration:
+```bash
+# 1. Start backend
+cd backend && ./start_live_server.sh
+
+# 2. Start frontend
+cd ../web-app && npm run dev
+
+# 3. Setup and run mobile app
+cd ../mobile-app && ./run_mobile_app.sh
+
+# 4. Test end-to-end flow:
+#    - Create session in web app
+#    - Scan QR code with mobile app
+#    - Start audio recording in web app
+#    - Take picture with mobile app
+#    - Verify <500ms image processing
+```
+
+### Verifying Direct Upload Performance:
+```bash
+# Monitor backend logs for timing
+tail -f backend/logs/app.log
+
+# Expected log sequence:
+# 1. "Image upload received" (immediate)
+# 2. "Image processed successfully" (<500ms later)
+# 3. WebSocket audio response (real-time)
+```
