@@ -17,7 +17,7 @@ import 'firebase_options.dart';
 import 'camera_service.dart';
 
 // Backend configuration
-//const String BACKEND_URL = 'http://localhost:8000'; // Change for production
+//const String BACKEND_URL = 'http://192.168.1.95:8000';
 const String BACKEND_URL = 'http://192.168.1.95:8000';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

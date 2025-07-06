@@ -17,8 +17,10 @@ import 'firebase_options.dart';
 import 'camera_service.dart';
 
 // Backend configuration
-//const String BACKEND_URL = 'http://192.168.1.95:8000';
-const String BACKEND_URL = 'http://192.168.1.95:8000';
+//const String BACKEND_URL = 'http://[1;33m🔍 Finding local IP address...[0m
+[0;32m✅ Found local IP: 192.168.1.95[0m:8000';
+const String BACKEND_URL = 'http://[1;33m🔍 Finding local IP address...[0m
+[0;32m✅ Found local IP: 192.168.1.95[0m:8000';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(

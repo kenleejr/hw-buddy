@@ -22,56 +22,75 @@ MAIN_DART_FILE="$MOBILE_APP_DIR/lib/main.dart"
 
 echo -e "${BLUE}📱 Mobile app directory: $MOBILE_APP_DIR${NC}"
 
+# Function to detect ngrok tunnel
+detect_ngrok_tunnel() {
+    echo -e "${YELLOW}🔍 Checking for active ngrok tunnel...${NC}" >&2
+    
+    # Check if ngrok is running and get the public URL
+    local ngrok_url=""
+    if command -v curl >/dev/null 2>&1; then
+        ngrok_url=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -o 'https://[^"]*\.ngrok\.io' | head -n1)
+    fi
+    
+    if [[ -n "$ngrok_url" ]]; then
+        echo -e "${GREEN}✅ Found active ngrok tunnel: $ngrok_url${NC}" >&2
+        echo "$ngrok_url"
+    else
+        echo "" # Return empty string if no ngrok tunnel found
+    fi
+}
+
 # Function to get local IP address
 get_local_ip() {
-    echo -e "${YELLOW}🔍 Finding local IP address...${NC}"
+    echo -e "${YELLOW}🔍 Finding local IP address...${NC}" >&2
     
     # Try different methods to get IP address
-    LOCAL_IP=""
+    local ip=""
     
     # Method 1: Try en0 (WiFi on macOS)
-    if [[ -z "$LOCAL_IP" ]]; then
-        LOCAL_IP=$(ifconfig en0 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+    if [[ -z "$ip" ]]; then
+        ip=$(ifconfig en0 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
     fi
     
     # Method 2: Try en1 (Ethernet on some systems)
-    if [[ -z "$LOCAL_IP" ]]; then
-        LOCAL_IP=$(ifconfig en1 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+    if [[ -z "$ip" ]]; then
+        ip=$(ifconfig en1 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
     fi
     
     # Method 3: Try any interface with 192.168.x.x
-    if [[ -z "$LOCAL_IP" ]]; then
-        LOCAL_IP=$(ifconfig 2>/dev/null | grep "inet " | grep "192.168" | awk '{print $2}' | head -n1)
+    if [[ -z "$ip" ]]; then
+        ip=$(ifconfig 2>/dev/null | grep "inet " | grep "192.168" | awk '{print $2}' | head -n1)
     fi
     
     # Method 4: Try any interface with 10.x.x.x
-    if [[ -z "$LOCAL_IP" ]]; then
-        LOCAL_IP=$(ifconfig 2>/dev/null | grep "inet " | grep "10\." | awk '{print $2}' | head -n1)
+    if [[ -z "$ip" ]]; then
+        ip=$(ifconfig 2>/dev/null | grep "inet " | grep "10\." | awk '{print $2}' | head -n1)
     fi
     
     # Method 5: Use route command (Linux/macOS)
-    if [[ -z "$LOCAL_IP" ]]; then
-        LOCAL_IP=$(route get default 2>/dev/null | grep interface | awk '{print $2}' | xargs ifconfig 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
+    if [[ -z "$ip" ]]; then
+        ip=$(route get default 2>/dev/null | grep interface | awk '{print $2}' | xargs ifconfig 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n1)
     fi
     
     # Method 6: Last resort - use hostname
-    if [[ -z "$LOCAL_IP" ]]; then
-        LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [[ -z "$ip" ]]; then
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     fi
     
-    if [[ -z "$LOCAL_IP" ]]; then
-        echo -e "${RED}❌ Could not determine local IP address${NC}"
-        echo -e "${YELLOW}Please enter your local IP address manually:${NC}"
-        read -p "IP Address: " LOCAL_IP
+    if [[ -z "$ip" ]]; then
+        echo -e "${RED}❌ Could not determine local IP address${NC}" >&2
+        echo -e "${YELLOW}Please enter your local IP address manually:${NC}" >&2
+        read -p "IP Address: " ip
         
-        if [[ -z "$LOCAL_IP" ]]; then
-            echo -e "${RED}❌ No IP address provided. Exiting.${NC}"
+        if [[ -z "$ip" ]]; then
+            echo -e "${RED}❌ No IP address provided. Exiting.${NC}" >&2
             exit 1
         fi
     fi
     
-    echo -e "${GREEN}✅ Found local IP: $LOCAL_IP${NC}"
-    echo "$LOCAL_IP"
+    echo -e "${GREEN}✅ Found local IP: $ip${NC}" >&2
+    # Output only the IP address to stdout for variable assignment
+    echo "$ip"
 }
 
 # Function to update main.dart with the correct IP
@@ -89,10 +108,10 @@ update_main_dart() {
     # Create backup
     cp "$MAIN_DART_FILE" "$MAIN_DART_FILE.backup"
     
-    # Update the BACKEND_URL line
+    # Update the BACKEND_URL line using a more robust approach
     if grep -q "const String BACKEND_URL" "$MAIN_DART_FILE"; then
-        # Replace existing BACKEND_URL line
-        sed -i '' "s|const String BACKEND_URL = .*|const String BACKEND_URL = '$backend_url';|" "$MAIN_DART_FILE"
+        # Use perl instead of sed for better handling of special characters
+        perl -i -pe "s|const String BACKEND_URL = .*|const String BACKEND_URL = '$backend_url';|" "$MAIN_DART_FILE"
         echo -e "${GREEN}✅ Updated existing BACKEND_URL in main.dart${NC}"
     else
         echo -e "${RED}❌ Could not find BACKEND_URL in main.dart${NC}"
@@ -187,8 +206,9 @@ run_mobile_app() {
     echo "1) Run on connected device/simulator (default)"
     echo "2) Build and open in Xcode"
     echo "3) Just build for testing"
+    echo "4) Use ngrok tunnel (enter ngrok URL manually)"
     
-    read -p "Enter choice (1-3) [1]: " choice
+    read -p "Enter choice (1-4) [1]: " choice
     choice=${choice:-1}
     
     case $choice in
@@ -206,6 +226,32 @@ run_mobile_app() {
             flutter build ios --debug
             echo -e "${GREEN}✅ Build complete. You can now test in Xcode.${NC}"
             ;;
+        4)
+            echo -e "${YELLOW}📡 Using ngrok tunnel mode${NC}"
+            echo -e "${BLUE}Instructions:${NC}"
+            echo "1. Make sure backend is running: cd ../backend && ./start_live_server.sh"
+            echo "2. Start ngrok in another terminal: ngrok http 8000"
+            echo "3. Copy the HTTPS forwarding URL (e.g., https://abc123.ngrok.io)"
+            echo ""
+            read -p "Enter your ngrok HTTPS URL: " ngrok_url
+            
+            if [[ -n "$ngrok_url" ]]; then
+                # Update main.dart with ngrok URL
+                echo -e "${YELLOW}📝 Updating main.dart with ngrok URL: $ngrok_url${NC}"
+                perl -i -pe "s|const String BACKEND_URL = .*|const String BACKEND_URL = '$ngrok_url';|" "$MAIN_DART_FILE"
+                echo -e "${GREEN}✅ Updated BACKEND_URL in main.dart${NC}"
+                
+                # Verify the change
+                echo -e "${BLUE}🔍 Current BACKEND_URL setting:${NC}"
+                grep "const String BACKEND_URL" "$MAIN_DART_FILE"
+                
+                echo -e "${BLUE}Running on device/simulator with ngrok...${NC}"
+                flutter run --debug
+            else
+                echo -e "${RED}❌ No ngrok URL provided. Exiting.${NC}"
+                exit 1
+            fi
+            ;;
         *)
             echo -e "${RED}❌ Invalid choice. Running on device/simulator...${NC}"
             flutter run --debug
@@ -220,24 +266,56 @@ main() {
     # Change to mobile app directory
     cd "$MOBILE_APP_DIR"
     
-    # Get local IP address
-    LOCAL_IP=$(get_local_ip)
+    # Check for ngrok tunnel first
+    NGROK_URL=$(detect_ngrok_tunnel)
     
-    # Update main.dart with the IP address
-    update_main_dart "$LOCAL_IP"
-    
-    # Test backend connectivity
-    test_backend_connectivity "$LOCAL_IP"
-    
-    # Prepare Flutter environment
-    prepare_flutter
-    
-    # Run the mobile app
-    run_mobile_app
+    if [[ -n "$NGROK_URL" ]]; then
+        echo -e "${GREEN}🚀 Using ngrok tunnel: $NGROK_URL${NC}"
+        
+        # Update main.dart with ngrok URL
+        perl -i -pe "s|const String BACKEND_URL = .*|const String BACKEND_URL = '$NGROK_URL';|" "$MAIN_DART_FILE"
+        echo -e "${GREEN}✅ Updated main.dart with ngrok URL${NC}"
+        
+        # Verify the change
+        echo -e "${BLUE}🔍 Current BACKEND_URL setting:${NC}"
+        grep "const String BACKEND_URL" "$MAIN_DART_FILE"
+        
+        # Test ngrok connectivity
+        if curl -s --connect-timeout 5 "$NGROK_URL/health" > /dev/null; then
+            echo -e "${GREEN}✅ Backend is accessible via ngrok${NC}"
+        else
+            echo -e "${YELLOW}⚠️  ngrok tunnel found but backend not responding${NC}"
+        fi
+        
+        # Prepare Flutter environment
+        prepare_flutter
+        
+        # Run the mobile app
+        run_mobile_app
+    else
+        # Fallback to local IP detection
+        LOCAL_IP=$(get_local_ip)
+        
+        # Update main.dart with the IP address
+        update_main_dart "$LOCAL_IP"
+        
+        # Test backend connectivity
+        test_backend_connectivity "$LOCAL_IP"
+        
+        # Prepare Flutter environment
+        prepare_flutter
+        
+        # Run the mobile app
+        run_mobile_app
+    fi
     
     echo ""
     echo -e "${GREEN}🎉 Mobile app setup complete!${NC}"
-    echo -e "${BLUE}📱 Your mobile app is configured to connect to: http://$LOCAL_IP:8000${NC}"
+    if [[ -n "$NGROK_URL" ]]; then
+        echo -e "${BLUE}📱 Your mobile app is configured to connect via ngrok: $NGROK_URL${NC}"
+    else
+        echo -e "${BLUE}📱 Your mobile app is configured to connect to: http://$LOCAL_IP:8000${NC}"
+    fi
     echo ""
     echo -e "${YELLOW}💡 Testing Tips:${NC}"
     echo "   1. Make sure backend is running: cd ../backend && ./start_live_server.sh"

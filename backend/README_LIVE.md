@@ -75,11 +75,40 @@ cd ../mobile-app
 ```
 
 The mobile script will automatically:
-- Detect your local IP address
-- Update mobile app configuration
-- Fix CocoaPods dependencies
-- Test backend connectivity
-- Build and run the mobile app
+- Detect your local IP address using multiple detection methods
+- Update mobile app configuration (main.dart) with correct backend URL
+- Fix CocoaPods dependencies and clean build environment  
+- Test backend connectivity before proceeding
+- Offer multiple build options (device run, Xcode, build-only)
+- Handle all Flutter and iOS setup complexities automatically
+
+**Note**: If backend connectivity test fails, you can choose to continue anyway. Make sure to start the backend server first: `cd ../backend && ./start_live_server.sh`
+
+#### ngrok Tunnel Support (Recommended for Mobile Testing)
+
+If you have network/firewall issues, the script supports ngrok tunneling:
+
+**Option 1 - Automatic Detection:**
+```bash
+# Start ngrok in separate terminal
+ngrok http 8000
+
+# Run mobile script - it will auto-detect and use ngrok tunnel
+./run_mobile_app.sh
+```
+
+**Option 2 - Manual ngrok Setup:**
+```bash
+./run_mobile_app.sh
+# Choose option 4 when prompted
+# Enter your ngrok URL when asked
+```
+
+**Benefits:**
+- ✅ Bypasses firewall/network issues
+- ✅ Works from any network (not just local WiFi)  
+- ✅ HTTPS by default (more secure)
+- ✅ No network configuration needed
 
 ## 📡 API Endpoints
 
