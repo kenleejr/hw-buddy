@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   pageExtensions: ['ts', 'tsx'],
+  reactStrictMode: false, // Temporarily disable to prevent double effect execution
   experimental: {
     typedRoutes: true,
   },

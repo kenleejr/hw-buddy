@@ -36,6 +36,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
   
   const audioClientRef = useRef<BackendAudioClient | null>(null);
   const processingStatusRef = useRef<HTMLDivElement>(null);
+  const initializingRef = useRef<boolean>(false);
 
   // Debug logging for currentMathJax changes
   useEffect(() => {
@@ -80,10 +81,18 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
       audioClientRef.current.disconnect();
       audioClientRef.current = null;
     }
+    initializingRef.current = false;
   };
 
   const initializeBackendAudioClient = async () => {
     try {
+      // Prevent multiple initializations
+      if (audioClientRef.current || initializingRef.current) {
+        console.log('🎵 Audio client already exists or initializing, skipping initialization');
+        return;
+      }
+      
+      initializingRef.current = true;
       console.log('🎵 Initializing backend audio client...');
       setStatus('Connecting to backend...');
       
@@ -117,11 +126,13 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
       await audioClient.connect(sessionId, 'ws://localhost:8000');
       
       audioClientRef.current = audioClient;
+      initializingRef.current = false;
       
     } catch (err: any) {
       console.error('🎵 Failed to initialize backend audio client:', err);
       setError(`Failed to connect: ${err.message}`);
       setStatus('Failed to connect to backend');
+      initializingRef.current = false;
     }
   };
 

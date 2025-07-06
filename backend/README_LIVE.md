@@ -1,6 +1,6 @@
 # HW Buddy Live Backend
 
-This is the updated backend implementation using Google's ADK Live API for real-time audio streaming and homework tutoring.
+This is the updated backend implementation using Google's ADK Live API for real-time audio streaming and homework tutoring with robust connection management and duplicate prevention.
 
 ## 🎯 New Architecture
 
@@ -9,6 +9,8 @@ This is the updated backend implementation using Google's ADK Live API for real-
 - **Audio Streaming**: Direct WebSocket audio communication (no Gemini Live on frontend)
 - **Direct Image Upload**: Mobile app uploads images directly to backend
 - **Real-time Processing**: Bidirectional audio streaming with low latency
+- **Connection Management**: Prevents duplicate WebSocket connections per session
+- **Robust Error Handling**: Graceful rejection of duplicate connections
 
 ### Components:
 
@@ -21,6 +23,8 @@ This is the updated backend implementation using Google's ADK Live API for real-
 - WebSocket manager for audio streaming
 - Handles bidirectional audio communication
 - Event processing from ADK agent
+- **Connection Deduplication**: Rejects duplicate connections per session
+- **Session Isolation**: Each session maintains single active connection
 
 #### 3. `image_upload_handler.py`
 - Direct image upload processing
@@ -84,6 +88,11 @@ POST /take_picture  # For gradual migration
 
 ## 🔧 WebSocket Audio Protocol
 
+### Connection Management:
+- **One Connection Per Session**: Each session ID can have only one active WebSocket connection
+- **Duplicate Rejection**: New connections to existing sessions are rejected with code `1008`
+- **Graceful Cleanup**: Proper resource cleanup on disconnection
+
 ### Client → Server Messages:
 ```json
 {
@@ -123,6 +132,33 @@ POST /take_picture  # For gradual migration
   "type": "turn_complete",
   "data": {"message": "Ready for next question!"}
 }
+
+{
+  "type": "recording_started",
+  "data": {"message": "Recording started"}
+}
+
+{
+  "type": "recording_stopped", 
+  "data": {"message": "Recording stopped"}
+}
+
+{
+  "type": "interrupted",
+  "data": {"message": "Response interrupted"}
+}
+
+{
+  "type": "error",
+  "data": {"message": "Error occurred"}
+}
+```
+
+### Connection Rejection:
+When a duplicate connection is attempted:
+```json
+WebSocket Close Code: 1008
+Reason: "Session already has active connection"
 ```
 
 ## 🎵 Audio Configuration
@@ -157,6 +193,22 @@ GET /health         # Health check
 - Audio streaming events
 - Image upload and processing
 - ADK agent interactions
+- **Connection Management**: Duplicate connection attempts and rejections
+- **WebSocket Events**: Connection/disconnection events with session tracking
+
+### Common Log Messages:
+```
+INFO - Audio WebSocket connected for session session_abc123
+WARNING - Rejecting duplicate WebSocket connection for session session_abc123  
+INFO - Audio WebSocket disconnected for session session_abc123
+INFO - Cancelled agent session task for session_abc123
+```
+
+### Troubleshooting:
+1. **Multiple Connections**: If you see duplicate rejection logs, check frontend for React StrictMode or double useEffect calls
+2. **Connection Failures**: Ensure backend is running and WebSocket endpoint is accessible
+3. **Audio Issues**: Check sample rates (16kHz input, 24kHz output) and PCM format
+4. **Session Issues**: Verify session ID format and that sessions are properly created before WebSocket connection
 
 ## 🔄 Migration from Original Backend
 
@@ -192,12 +244,69 @@ RECEIVE_SAMPLE_RATE=24000
 SEND_SAMPLE_RATE=16000
 ```
 
-## 🎯 Next Steps
+## 🎯 Production Considerations
 
-1. **Frontend Update**: Remove Gemini Live, add WebSocket audio streaming
-2. **Mobile Update**: Change to direct HTTP image upload
-3. **Testing**: End-to-end audio and image flow
-4. **Performance**: Optimize audio buffering and latency
+### Connection Management:
+1. **Session Cleanup**: Implement session timeout for abandoned connections
+2. **Load Balancing**: Consider session affinity if using multiple backend instances
+3. **Rate Limiting**: Add rate limiting for connection attempts per IP/session
+
+### Performance:
+1. **Audio Buffering**: Optimize audio queue management for lower latency
+2. **Memory Management**: Monitor session memory usage and cleanup
+3. **Concurrent Sessions**: Test with multiple simultaneous audio sessions
+
+### Security:
+1. **Session Validation**: Implement proper session ID validation and expiration
+2. **Audio Validation**: Validate audio data format and size limits
+3. **Connection Limits**: Implement per-IP connection limits
+
+### Monitoring:
+1. **Metrics**: Track active sessions, connection attempts, rejections
+2. **Health Checks**: Monitor WebSocket connection health
+3. **Error Tracking**: Log and track connection errors and failures
+
+## 🖥️ Frontend Integration
+
+### WebSocket Audio Client:
+The frontend uses `BackendAudioClient` class for audio streaming:
+
+```typescript
+const audioClient = new BackendAudioClient({
+  inputSampleRate: 16000,
+  outputSampleRate: 24000,
+  inputBufferSize: 512,
+  outputBufferSize: 1024,
+});
+
+// Connection with duplicate prevention
+await audioClient.connect(sessionId, 'ws://localhost:8000');
+
+// Event handlers
+audioClient.onMessage = (message) => {
+  switch (message.type) {
+    case 'agent_ready':
+      console.log('Agent ready!');
+      break;
+    case 'audio':
+      // Handle audio playback
+      break;
+    case 'turn_complete':
+      console.log('Turn complete');
+      break;
+  }
+};
+```
+
+### Connection Management:
+- **Duplicate Prevention**: Frontend checks for existing connections before creating new ones
+- **React StrictMode**: Disabled in development to prevent double useEffect execution
+- **Error Handling**: Graceful handling of connection rejections
+
+### Key Frontend Files:
+- `backendAudioClient.ts`: WebSocket audio client with connection management
+- `BackendAudioSession.tsx`: React component managing audio session
+- `backendAudio.ts`: Audio processing utilities
 
 ## 🔧 Development
 
@@ -217,3 +326,9 @@ curl -X POST \
   -F "file=@test_image.jpg" \
   -F "user_ask=Help me solve this problem"
 ```
+
+### Testing Connection Management:
+1. Open browser dev tools
+2. Connect to a session via WebSocket
+3. Try connecting again with same session ID
+4. Verify second connection is rejected with code 1008

@@ -23,8 +23,19 @@ class AudioWebSocketManager:
         self.session_tasks: Dict[str, asyncio.Task] = {}
         self.hw_agent = get_hw_live_agent()
     
-    async def connect(self, websocket: WebSocket, session_id: str):
-        """Accept a new WebSocket connection for audio streaming."""
+    async def connect(self, websocket: WebSocket, session_id: str) -> bool:
+        """Accept a new WebSocket connection for audio streaming.
+        
+        Returns:
+            bool: True if connection was accepted, False if rejected
+        """
+        
+        # Check if session already has an active connection
+        if session_id in self.active_connections:
+            logger.warning(f"Rejecting duplicate WebSocket connection for session {session_id}")
+            await websocket.close(code=1008, reason="Session already has active connection")
+            return False
+        
         await websocket.accept()
         self.active_connections[session_id] = websocket
         logger.info(f"Audio WebSocket connected for session {session_id}")
@@ -34,6 +45,8 @@ class AudioWebSocketManager:
         
         # Start the ADK Live session
         await self._start_agent_session(session_id)
+        
+        return True
     
     def disconnect(self, session_id: str):
         """Disconnect and clean up a WebSocket connection."""

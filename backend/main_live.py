@@ -181,20 +181,25 @@ async def audio_websocket_endpoint(websocket: WebSocket, session_id: str):
             await websocket.close(code=1003, reason="Invalid session ID")
             return
         
-        # Connect to WebSocket manager
-        await websocket_manager.connect(websocket, session_id)
+        # Connect to WebSocket manager (this may reject the connection)
+        connection_accepted = await websocket_manager.connect(websocket, session_id)
         
-        try:
-            # Handle incoming messages
-            while True:
-                message = await websocket.receive_text()
-                await websocket_manager.handle_websocket_message(session_id, message)
-                
-        except WebSocketDisconnect:
-            logger.info(f"Audio WebSocket disconnected for session {session_id}")
-        except Exception as e:
-            logger.error(f"Audio WebSocket error for session {session_id}: {e}")
-            logger.error(traceback.format_exc())
+        # Only proceed if connection was accepted
+        if connection_accepted:
+            try:
+                # Handle incoming messages
+                while True:
+                    message = await websocket.receive_text()
+                    await websocket_manager.handle_websocket_message(session_id, message)
+                    
+            except WebSocketDisconnect:
+                logger.info(f"Audio WebSocket disconnected for session {session_id}")
+            except Exception as e:
+                logger.error(f"Audio WebSocket error for session {session_id}: {e}")
+                logger.error(traceback.format_exc())
+        else:
+            # Connection was rejected, just return
+            return
         
     finally:
         websocket_manager.disconnect(session_id)

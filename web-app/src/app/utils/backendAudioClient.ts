@@ -62,6 +62,12 @@ export class BackendAudioClient {
    */
   async connect(sessionId: string, backendUrl: string = 'ws://localhost:8000'): Promise<void> {
     try {
+      // Prevent multiple connections to the same session
+      if (this.websocket && (this.isConnected || this.websocket.readyState === WebSocket.CONNECTING)) {
+        console.log('🔌 Already connected or connecting to WebSocket, skipping connection');
+        return;
+      }
+      
       // Close existing connection
       if (this.websocket) {
         this.disconnect();
@@ -101,6 +107,15 @@ export class BackendAudioClient {
         console.log('🔌 WebSocket closed:', event.code, event.reason);
         this.isConnected = false;
         this.onConnectionChange?.(false);
+        
+        // Handle rejection due to duplicate connection
+        if (event.code === 1008) {
+          console.log('🔌 Connection rejected - session already has active connection');
+          this.onError?.('Session already has an active connection. Please refresh if this persists.');
+          return;
+        }
+        
+        // Handle other close reasons normally
       };
 
       // Wait for connection
@@ -409,9 +424,10 @@ export class BackendAudioClient {
         resolve();
       };
 
-      this.websocket.onerror = () => {
+      this.websocket.onerror = (error) => {
         clearTimeout(timeout);
-        reject(new Error('Connection failed'));
+        console.error('🔌 WebSocket connection error:', error);
+        reject(new Error('Connection failed - check if backend is running'));
       };
     });
   }
@@ -422,18 +438,34 @@ export class BackendAudioClient {
   disconnect(): void {
     this.stopRecording();
 
+    // Clean up WebSocket
     if (this.websocket) {
-      this.websocket.close();
+      try {
+        if (this.websocket.readyState === WebSocket.OPEN || this.websocket.readyState === WebSocket.CONNECTING) {
+          this.websocket.close();
+        }
+      } catch (error) {
+        console.warn('🔌 Error closing WebSocket:', error);
+      }
       this.websocket = null;
     }
 
-    if (this.inputAudioContext) {
-      this.inputAudioContext.close();
+    // Clean up audio contexts
+    if (this.inputAudioContext && this.inputAudioContext.state !== 'closed') {
+      try {
+        this.inputAudioContext.close();
+      } catch (error) {
+        console.warn('🔌 Error closing input audio context:', error);
+      }
       this.inputAudioContext = null;
     }
 
-    if (this.outputAudioContext) {
-      this.outputAudioContext.close();
+    if (this.outputAudioContext && this.outputAudioContext.state !== 'closed') {
+      try {
+        this.outputAudioContext.close();
+      } catch (error) {
+        console.warn('🔌 Error closing output audio context:', error);
+      }
       this.outputAudioContext = null;
     }
 
