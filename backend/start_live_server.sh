@@ -37,6 +37,9 @@ if [ -z "$GOOGLE_CLOUD_PROJECT" ] && [ -z "$GOOGLE_AI_API_KEY" ]; then
     echo "   Or ensure GOOGLE_APPLICATION_CREDENTIALS is set"
 fi
 
+# Set Firebase project for mobile app integration
+export GOOGLE_CLOUD_PROJECT="hw-buddy-66d6b"
+
 # Start the server
 echo "🎯 Starting ADK Live server on port 8000..."
 echo ""

@@ -45,9 +45,13 @@ class ImageUploadHandler:
             Processing results as a dictionary
         """
         try:
+            logger.info(f"Processing image upload for session {session_id}")
+            logger.info(f"File info: filename={file.filename}, content_type={file.content_type}")
+            
             # Validate session exists
             session_status = self.hw_agent.get_session_status(session_id)
             if not session_status.get("exists"):
+                logger.error(f"Session {session_id} not found")
                 raise HTTPException(
                     status_code=404, 
                     detail=f"Session {session_id} not found"
@@ -55,6 +59,7 @@ class ImageUploadHandler:
             
             # Validate file type
             if file.content_type not in self.supported_formats:
+                logger.error(f"Unsupported file type: {file.content_type}. Supported: {self.supported_formats}")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Unsupported file type: {file.content_type}. "

@@ -29,7 +29,7 @@ detect_ngrok_tunnel() {
     # Check if ngrok is running and get the public URL
     local ngrok_url=""
     if command -v curl >/dev/null 2>&1; then
-        ngrok_url=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -o 'https://[^"]*\.ngrok\.io' | head -n1)
+        ngrok_url=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -o 'https://[^"]*\.ngrok[^"]*' | head -n1)
     fi
     
     if [[ -n "$ngrok_url" ]]; then

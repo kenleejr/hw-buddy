@@ -10,6 +10,8 @@ import base64
 import io
 from typing import Dict, Any, Optional, AsyncIterator
 from PIL import Image
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 # Google ADK imports
 from google.adk.agents import Agent, LiveRequestQueue
@@ -52,6 +54,9 @@ class HWBuddyLiveAgent:
         self.sessions: Dict[str, Any] = {}
         self.session_service = InMemorySessionService()
         
+        # Initialize Firebase for Firestore communication
+        self._init_firebase()
+        
         # Create the ADK agent with homework tutoring capabilities
         self.agent = Agent(
             name="homework_tutor",
@@ -69,6 +74,76 @@ class HWBuddyLiveAgent:
         
         logger.info("HW Buddy Live Agent initialized")
     
+    def _init_firebase(self):
+        """Initialize Firebase connection for Firestore communication."""
+        try:
+            # Check if Firebase is already initialized
+            firebase_admin.get_app()
+            logger.info("Firebase already initialized")
+        except ValueError:
+            # Try multiple initialization methods
+            initialized = False
+            import os
+            
+            # Method 1: Try environment variable path (GOOGLE_APPLICATION_CREDENTIALS)
+            if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+                service_account_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+                # Handle relative paths
+                if not os.path.isabs(service_account_path):
+                    service_account_path = os.path.join(os.path.dirname(__file__), service_account_path)
+                
+                if os.path.exists(service_account_path):
+                    try:
+                        cred = credentials.Certificate(service_account_path)
+                        firebase_admin.initialize_app(cred, {
+                            'projectId': 'hw-buddy-66d6b'
+                        })
+                        logger.info(f"Firebase initialized with service account: {service_account_path}")
+                        initialized = True
+                    except Exception as e:
+                        logger.warning(f"Service account initialization failed: {e}")
+            
+            # Method 2: Try default service account file location  
+            if not initialized:
+                service_account_path = os.path.join(os.path.dirname(__file__), "../donotinclude/hw-buddy-66d6b-firebase-adminsdk-fbsvc-78a283697a.json")
+                if os.path.exists(service_account_path):
+                    try:
+                        cred = credentials.Certificate(service_account_path)
+                        firebase_admin.initialize_app(cred, {
+                            'projectId': 'hw-buddy-66d6b'
+                        })
+                        logger.info("Firebase initialized with donotinclude service account file")
+                        initialized = True
+                    except Exception as e:
+                        logger.warning(f"Donotinclude service account initialization failed: {e}")
+            
+            # Method 3: Try application default credentials
+            if not initialized:
+                try:
+                    os.environ['GOOGLE_CLOUD_PROJECT'] = 'hw-buddy-66d6b'
+                    cred = credentials.ApplicationDefault()
+                    firebase_admin.initialize_app(cred, {
+                        'projectId': 'hw-buddy-66d6b'
+                    })
+                    logger.info("Firebase initialized with application default credentials")
+                    initialized = True
+                except Exception as e:
+                    logger.warning(f"Application default credentials failed: {e}")
+            
+            if not initialized:
+                logger.error("Could not initialize Firebase with any method")
+                logger.error("Make sure GOOGLE_APPLICATION_CREDENTIALS points to the correct service account file")
+                self.db = None
+                return
+        
+        try:
+            self.db = firestore.client()
+            logger.info("Firestore client initialized successfully")
+        except Exception as e:
+            logger.warning(f"Could not initialize Firestore client: {e}")
+            logger.info("Mobile app picture commands will not work")
+            self.db = None
+    
     def take_picture_and_analyze(self, user_ask: str) -> str:
         """
         Tool function to analyze the student's homework image.
@@ -80,20 +155,40 @@ class HWBuddyLiveAgent:
         Returns:
             JSON string with analysis results
         """
-        # For now, simulate that we've taken and analyzed a picture
-        # This will be enhanced to work with actual image data from mobile uploads
+        logger.info(f"ADK agent requesting picture analysis: {user_ask}")
+        
+        # Get current session ID (we'll store this during session creation)
+        current_session_id = getattr(self, 'current_session_id', None)
+        if not current_session_id and self.sessions:
+            # Fallback: get from sessions dict (should have one active)
+            current_session_id = list(self.sessions.keys())[0]
+        
+        # Trigger mobile app to take picture via Firestore
+        if self.db and current_session_id:
+            try:
+                self.db.collection('sessions').document(current_session_id).set({
+                    'command': 'take_picture',
+                    'user_ask': user_ask,
+                    'timestamp': firestore.SERVER_TIMESTAMP,
+                    'status': 'waiting_for_image'
+                }, merge=True)
+                logger.info(f"Firestore command sent to session {current_session_id}")
+            except Exception as e:
+                logger.error(f"Failed to send Firestore command: {e}")
+        
+        # Return response indicating we're waiting for the image
         return json.dumps({
-            "status": "success",
+            "status": "waiting_for_image",
             "user_ask": user_ask,
-            "analysis": "I can see your homework paper with some mathematical problems. I'm ready to help you work through them step by step.",
-            "next_steps": "Please tell me which specific problem you're having trouble with, and I'll guide you through the solution.",
-            "message": "I've taken a picture and can see your homework! What would you like help with?"
+            "message": "I'm taking a picture of your homework now. Please wait a moment while I analyze it...",
+            "session_id": current_session_id
         })
     
     async def create_session(self, session_id: str) -> Dict[str, Any]:
         """Create a new session for audio streaming."""
         if session_id in self.sessions:
             logger.warning(f"Session {session_id} already exists, returning existing session")
+            self.current_session_id = session_id  # Track current session
             return self.sessions[session_id]
         
         # Create ADK session - this method is actually async!
@@ -138,6 +233,7 @@ class HWBuddyLiveAgent:
         }
         
         self.sessions[session_id] = session_data
+        self.current_session_id = session_id  # Track current session
         logger.info(f"Created session {session_id}")
         
         return session_data
