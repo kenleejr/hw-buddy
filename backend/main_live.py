@@ -16,6 +16,8 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 # Import our new components
 from hw_live_agent import get_hw_live_agent
@@ -28,6 +30,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Firebase initialization is handled by hw_live_agent
 
 # Create FastAPI app
 app = FastAPI(
@@ -47,8 +51,8 @@ app.add_middleware(
 
 # Get component instances
 hw_agent = get_hw_live_agent()
-websocket_manager = get_audio_websocket_manager()
-image_handler = get_image_upload_handler()
+websocket_manager = get_audio_websocket_manager(hw_agent)
+image_handler = get_image_upload_handler(hw_agent, websocket_manager)
 
 
 # Request/Response Models

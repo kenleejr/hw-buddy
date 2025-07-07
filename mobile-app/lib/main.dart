@@ -200,8 +200,7 @@ class SessionModel extends ChangeNotifier {
         ),
       );
       
-      // Add user ask field (empty for automatic analysis)
-      request.fields['user_ask'] = 'Please help me with this homework problem';
+      // Mobile app only sends raw image data - no user context needed
 
       _statusMessage = 'Analyzing...';
       notifyListeners();

@@ -22,7 +22,6 @@ from google.adk.models.llm_request import LlmRequest
 from google.genai.types import Part, UserContent, Content
 from google.adk.events import Event, EventActions
 from firebase_admin import firestore
-from firestore_listener import get_firestore_listener
 from prompts import *
 
 # Configure logging for this module
@@ -118,14 +117,12 @@ class HWTutorAgent:
         logger.info("Creating take_picture tool...")
         
         def create_take_picture_and_analyze_function(db):
-            async def take_picture_and_analyze_tool(tool_context: ToolContext, user_ask: str) -> dict:
+            async def take_picture_and_analyze_tool(tool_context: ToolContext, user_ask: str) -> str:
                 """
-                Tool function that takes a picture using the existing camera system,
-                then uses Gemini to analyze the image and extract relevant content.
-                Returns the analysis as text that the ADK agent can understand.
+                Tool that triggers image capture and retrieves raw image bytes.
+                The image bytes are stored in context for injection into the next LLM request.
                 """
                 try:
-                    # Get session_id from context state
                     session_id = tool_context._invocation_context.session.id
                     if not session_id:
                         logger.error(f"Tool context state: {tool_context.state}")
@@ -134,53 +131,54 @@ class HWTutorAgent:
                     
                     logger.info(f"Taking picture for session {session_id}, user_ask: {user_ask}")
                     
-                    # Get current image URL to detect changes
+                    # Ensure session exists in Firestore for mobile app coordination
                     session_ref = db.collection('sessions').document(session_id)
                     current_doc = session_ref.get()
-                    current_image_url = None
                     
-                    if current_doc.exists:
-                        current_data = current_doc.to_dict()
-                        current_image_url = current_data.get('last_image_url')
-                    else:
+                    if not current_doc.exists:
                         raise Exception(f"Session {session_id} not found")
+                    
+                    # Create event and register it for direct notification
+                    upload_event = asyncio.Event()
+                    from main import upload_events, session_images
+                    upload_events[session_id] = upload_event
                     
                     # Trigger picture taking
                     session_ref.update({'command': 'take_picture'})
+                    logger.info(f"Sent take_picture command to session {session_id}")
                     
-                    # Wait for new image using real-time listener
-                    listener = get_firestore_listener(db)
-                    updated_data = await listener.wait_for_image_update(
-                        session_id=session_id,
-                        timeout=30,
-                        current_image_url=current_image_url
-                    )
+                    # Wait for direct notification from upload endpoint
+                    try:
+                        await asyncio.wait_for(upload_event.wait(), timeout=30)
+                        logger.info(f"Received upload notification for session {session_id}")
+                    except asyncio.TimeoutError:
+                        raise Exception(f"Timeout waiting for image upload from session {session_id}")
+                    finally:
+                        # Clean up event to prevent memory leaks
+                        if session_id in upload_events:
+                            del upload_events[session_id]
                     
-                    new_image_url = updated_data.get('last_image_url')
-                    new_image_gcs_url = updated_data.get('last_image_gcs_url')
+                    # Get raw image bytes from session storage
+                    if session_id not in session_images:
+                        raise Exception(f"No image data found for session {session_id}")
                     
-                    if not new_image_url:
-                        raise Exception("No image URL received from camera")
+                    image_data = session_images[session_id]
+                    image_bytes = image_data['bytes']
+                    mime_type = image_data['mime_type']
                     
-                    # Store image info in session state (accessible after tool execution)
-                    tool_context.state["last_image_url"] = new_image_url
-                    tool_context.state["last_image_gcs_url"] = new_image_gcs_url
+                    logger.info(f"Retrieved image data: {len(image_bytes)} bytes, type: {mime_type}")
                     
-                    # Analyze the image using Gemini
-                    image_url_to_analyze = new_image_gcs_url if new_image_gcs_url else new_image_url
-                    logger.info(f"Analyzing image with Gemini: {image_url_to_analyze}")
+                    # Store image bytes in context for injection callback
+                    tool_context.state["pending_image_bytes"] = image_bytes
+                    tool_context.state["pending_image_mime_type"] = mime_type
+                    tool_context.state["pending_user_ask"] = user_ask
                     
-                    # Store image info in state for before_model_callback to use
-                    tool_context.state["pending_image_url"] = image_url_to_analyze
-                    tool_context.state["pending_image_user_ask"] = user_ask
-                    
-                    # Return a simple success message 
-                    return f"Image captured of user's homework"
+                    return "Image captured successfully. I can now see your homework."
                     
                 except Exception as e:
-                    logger.error(f"Error taking picture and analyzing: {str(e)}")
+                    logger.error(f"Error in take_picture_and_analyze_tool: {str(e)}")
                     logger.error(f"Full traceback: {traceback.format_exc()}")
-                    return f"Error taking picture and analyzing: {str(e)}"
+                    return f"Error capturing image: {str(e)}"
             
             return take_picture_and_analyze_tool
         
@@ -203,35 +201,35 @@ class HWTutorAgent:
         # Define the before_model_callback to inject images
         def inject_image_callback(callback_context: CallbackContext, llm_request: LlmRequest):
             """
-            Before model callback that injects pending images into the LLM request.
-            This allows the LLM to see and analyze images captured by tools.
+            Before model callback that injects pending image bytes into the LLM request.
+            Uses raw image bytes instead of URI for better performance and simplicity.
             """
-            # Check if there's a pending image to inject
-            pending_image_url = callback_context.state.get("pending_image_url")
-            pending_user_ask = callback_context.state.get("pending_image_user_ask")
+            # Check if there are pending image bytes to inject
+            pending_image_bytes = callback_context.state.get("pending_image_bytes")
+            pending_mime_type = callback_context.state.get("pending_image_mime_type", "image/jpeg")
             
-            if pending_image_url:
-                logger.info(f"Injecting image into LLM request: {pending_image_url}")
+            if pending_image_bytes:
+                logger.info(f"Injecting image bytes into LLM request: {len(pending_image_bytes)} bytes, type: {pending_mime_type}")
                 
-                # Create image part
-                image_part = Part.from_uri(
-                    file_uri=pending_image_url,
-                    mime_type="image/jpeg"
+                # Create image part from raw bytes - much cleaner than URI!
+                image_part = Part.from_bytes(
+                    data=pending_image_bytes,
+                    mime_type=pending_mime_type
                 )
                 
-                # Add the image and context to the LLM request
+                # Add the image content to the LLM request
                 if not llm_request.contents:
                     llm_request.contents = []
                 
-                # Insert the image content as a user message before the agent processes
+                # Insert the image content as a user message
                 image_content = Content(role="user", parts=[image_part])
                 llm_request.contents.append(image_content)
                 
-                # Clear the pending image from state
-                callback_context.state["pending_image_url"] = None
-                callback_context.state["pending_image_user_ask"] = None
+                # Clear the pending image from state to avoid reinjection
+                callback_context.state["pending_image_bytes"] = None
+                callback_context.state["pending_image_mime_type"] = None
                 
-                logger.info("Image successfully injected into LLM request")
+                logger.info("Image bytes successfully injected into LLM request")
 
         self.hint_agent = LlmAgent(
             name="HintAgent",

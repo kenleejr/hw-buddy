@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 class ImageUploadHandler:
     """Handles image uploads and processing for homework analysis."""
     
-    def __init__(self):
-        self.hw_agent = get_hw_live_agent()
-        self.websocket_manager = get_audio_websocket_manager()
+    def __init__(self, hw_agent=None, websocket_manager=None):
+        self.hw_agent = hw_agent or get_hw_live_agent()
+        self.websocket_manager = websocket_manager or get_audio_websocket_manager()
         
         # Supported image formats
         self.supported_formats = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp'}
@@ -205,9 +205,12 @@ class ImageUploadHandler:
 
 
 # Global handler instance
-image_upload_handler = ImageUploadHandler()
+image_upload_handler = None
 
 
-def get_image_upload_handler() -> ImageUploadHandler:
+def get_image_upload_handler(hw_agent=None, websocket_manager=None) -> ImageUploadHandler:
     """Get the global image upload handler."""
+    global image_upload_handler
+    if image_upload_handler is None:
+        image_upload_handler = ImageUploadHandler(hw_agent, websocket_manager)
     return image_upload_handler

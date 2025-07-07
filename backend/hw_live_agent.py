@@ -8,6 +8,8 @@ import json
 import logging
 import base64
 import io
+import os
+import re
 from typing import Dict, Any, Optional, AsyncIterator
 from PIL import Image
 import firebase_admin
@@ -26,6 +28,41 @@ from prompts import STATE_ESTABLISHER_AGENT_PROMPT, HINT_AGENT_PROMPT
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+def extract_mathjax_content(text: str) -> str:
+    """Extract MathJax content from Gemini response or return a basic format."""
+    # Look for existing MathJax patterns
+    math_patterns = [
+        r'\$\$.*?\$\$',  # Display math
+        r'\$.*?\$',      # Inline math
+    ]
+    
+    found_math = []
+    for pattern in math_patterns:
+        matches = re.findall(pattern, text, re.DOTALL)
+        found_math.extend(matches)
+    
+    if found_math:
+        return '\n\n'.join(found_math)
+    
+    # If no explicit math found, try to extract equations or expressions
+    # Look for common math patterns
+    equation_patterns = [
+        r'[a-zA-Z]?\s*[=]\s*.*',  # Equations with equals
+        r'\d+[x]\s*[+\-]\s*\d+\s*[=]\s*\d+',  # Simple algebraic equations
+    ]
+    
+    for pattern in equation_patterns:
+        matches = re.findall(pattern, text)
+        if matches:
+            # Wrap in MathJax
+            return '$$' + matches[0] + '$$'
+    
+    # Fallback: wrap the entire text as math if it looks mathematical
+    if any(char in text for char in ['=', '+', '-', '*', '/', 'x', 'y']):
+        return f"$${text.strip()}$$"
+    
+    return "$$\\text{Mathematical problem detected}$$"
 
 # Audio configuration matching frontend
 RECEIVE_SAMPLE_RATE = 24000  # Audio output to frontend
@@ -290,19 +327,93 @@ class HWBuddyLiveAgent:
             # Store the image in the session
             session_data["current_image"] = image_data
             
-            # Convert image for analysis (you might want to add image preprocessing here)
+            # Convert image for analysis
             image = Image.open(io.BytesIO(image_data))
+            logger.info(f"Processing image: {image.size}, format: {image.format}")
             
-            # For now, we'll create a mock analysis
-            # In a full implementation, you'd use the vision model here
-            analysis_result = {
-                "success": True,
-                "problem_analysis": "Mathematical problem detected in the image",
-                "student_progress": "Student has started working on the problem",
-                "next_steps": "Continue with the next step in the solution",
-                "mathjax_content": "$$\\text{Problem detected: } 2x + 3 = 7$$",
-                "help_text": f"I can see your homework! {user_ask if user_ask else 'Let me help you with this problem.'}"
-            }
+            # Real Gemini image analysis
+            try:
+                # Create client and content for Gemini
+                client = genai.Client(
+                    api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+                )
+                
+                # Create analysis prompt based on user question
+                analysis_prompt = f"""
+                Analyze this homework image and extract the mathematical problem and any student work shown.
+                
+                User's question: "{user_ask if user_ask else 'Help me with this problem'}"
+                
+                Provide the response in this exact format:
+                
+                **Problem:** [Brief description of the main problem]
+                
+                $$[main_equation_or_problem]$$
+                
+                **Student's Work:**
+                $$[any_work_shown]$$
+                
+                **Current Status:** [What step they're on or what needs to be done next]
+                
+                Focus on mathematical content and format equations properly in LaTeX/MathJax notation.
+                """
+                
+                # Create content with image and text
+                contents = [
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_bytes(
+                                mime_type="image/jpeg",
+                                data=image_data
+                            ),
+                            types.Part.from_text(text=analysis_prompt),
+                        ],
+                    ),
+                ]
+                
+                # Generate content config
+                generate_content_config = types.GenerateContentConfig(
+                    response_mime_type="text/plain",
+                )
+                
+                # Generate analysis
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=contents,
+                    config=generate_content_config,
+                )
+                
+                if response and response.text:
+                    analysis_text = response.text
+                    logger.info(f"Gemini analysis: {analysis_text[:200]}...")
+                    
+                    # Extract MathJax content from the response
+                    mathjax_content = extract_mathjax_content(analysis_text)
+                    
+                    analysis_result = {
+                        "success": True,
+                        "problem_analysis": analysis_text,
+                        "student_progress": "Analyzing student's current work...",
+                        "next_steps": "Based on the image analysis",
+                        "mathjax_content": mathjax_content,
+                        "help_text": f"I can see your homework! {analysis_text}"
+                    }
+                else:
+                    # Fallback if no response
+                    raise Exception("No response from Gemini model")
+                    
+            except Exception as gemini_error:
+                logger.error(f"Gemini analysis failed: {gemini_error}")
+                # Fallback to basic analysis
+                analysis_result = {
+                    "success": True,
+                    "problem_analysis": "I can see your homework image but had trouble with detailed analysis.",
+                    "student_progress": "Image received successfully",
+                    "next_steps": "Let me help you work through this step by step",
+                    "mathjax_content": "$$\\text{Problem detected in image}$$",
+                    "help_text": f"I can see your homework! {user_ask if user_ask else 'Let me help you with this problem.'} (Note: Using basic analysis due to processing issue)"
+                }
             
             # Update problem state
             session_data["problem_state"] = analysis_result

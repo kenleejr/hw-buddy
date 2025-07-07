@@ -2,7 +2,7 @@
 
 # HW Buddy Live Server Startup Script
 
-echo "🚀 Starting HW Buddy Live Backend with ADK Live Agent..."
+echo "🚀 Starting HW Buddy Optimized Backend with Event-Based Processing..."
 echo ""
 
 # Check if virtual environment exists
@@ -41,22 +41,23 @@ fi
 export GOOGLE_CLOUD_PROJECT="hw-buddy-66d6b"
 
 # Start the server
-echo "🎯 Starting ADK Live server on port 8000..."
+echo "🎯 Starting optimized server on port 8000..."
 echo ""
-echo "New Features:"
-echo "  • ADK Live Agent with real-time audio streaming"
-echo "  • Direct image upload from mobile app" 
-echo "  • Bidirectional WebSocket audio communication"
+echo "Latest Features:"
+echo "  • Real Gemini 2.0 Flash image analysis (replaces hardcoded responses)"
+echo "  • Live audio streaming with ADK Live API"
+echo "  • Smart MathJax extraction from homework images"
+echo "  • Optimized WebSocket communication"
 echo ""
 echo "Endpoints:"
-echo "  • Audio WebSocket: ws://localhost:8000/ws/audio/{session_id}"
-echo "  • Image Upload: POST /sessions/{session_id}/upload_image"
-echo "  • Session Management: POST /sessions, GET /sessions/{id}/status"
+echo "  • WebSocket: ws://localhost:8000/ws/audio/{session_id}"
+echo "  • Image Upload: POST /take_picture" 
+echo "  • Health Check: GET /health"
 echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""
 
-# Start the server with uvicorn
+# Start the server with uvicorn (using live backend with working audio)
 python main_live.py
 
 echo ""

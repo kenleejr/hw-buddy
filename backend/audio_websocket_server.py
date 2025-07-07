@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 class AudioWebSocketManager:
     """Manages WebSocket connections for audio streaming."""
     
-    def __init__(self):
+    def __init__(self, hw_agent=None):
         self.active_connections: Dict[str, WebSocket] = {}
         self.session_tasks: Dict[str, asyncio.Task] = {}
-        self.hw_agent = get_hw_live_agent()
+        self.hw_agent = hw_agent or get_hw_live_agent()
     
     async def connect(self, websocket: WebSocket, session_id: str) -> bool:
         """Accept a new WebSocket connection for audio streaming.
@@ -229,9 +229,12 @@ class AudioWebSocketManager:
 
 
 # Global manager instance
-audio_websocket_manager = AudioWebSocketManager()
+audio_websocket_manager = None
 
 
-def get_audio_websocket_manager() -> AudioWebSocketManager:
+def get_audio_websocket_manager(hw_agent=None) -> AudioWebSocketManager:
     """Get the global audio WebSocket manager."""
+    global audio_websocket_manager
+    if audio_websocket_manager is None:
+        audio_websocket_manager = AudioWebSocketManager(hw_agent)
     return audio_websocket_manager

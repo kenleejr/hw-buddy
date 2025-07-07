@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import firebase_admin
@@ -8,6 +8,7 @@ import logging
 import traceback
 import json
 import asyncio
+import time
 from typing import Optional, Dict
 from hw_tutor_agent import get_hw_tutor_agent
 
@@ -88,6 +89,12 @@ if not firebase_admin._apps:
         print(f"Warning: Could not initialize Firebase Admin SDK: {e}")
 
 db = firestore.client()
+
+# Global session storage for images - stores raw bytes by session_id
+session_images = {}  # Dictionary to store image bytes by session_id
+
+# Global event storage for direct ADK agent notification
+upload_events = {}  # Dictionary to store asyncio.Event by session_id
 
 
 class ConnectionManager:
@@ -344,6 +351,64 @@ async def take_picture(request: TakePictureRequest):
         logger.error(f"Full traceback: {traceback.format_exc()}")
         error_message = f"Failed to process request: {str(e)}"
         raise HTTPException(status_code=500, detail=error_message)
+
+@app.post("/sessions/{session_id}/upload_image")
+async def upload_image_raw(
+    session_id: str,
+    file: UploadFile = File(...)
+):
+    """
+    Simple image upload that stores raw bytes for ADK agent.
+    No analysis - just storage and Firestore notification.
+    """
+    try:
+        # Validate file type
+        if file.content_type not in ['image/jpeg', 'image/jpg', 'image/png']:
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        
+        # Read raw image bytes
+        image_bytes = await file.read()
+        
+        if len(image_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty file")
+        
+        # Store raw bytes in memory by session_id
+        session_images[session_id] = {
+            'bytes': image_bytes,
+            'mime_type': file.content_type,
+            'timestamp': int(time.time() * 1000)
+        }
+        
+        logger.info(f"Stored image for session {session_id}: {len(image_bytes)} bytes")
+        
+        # Directly notify waiting ADK agent via event
+        if session_id in upload_events:
+            upload_events[session_id].set()
+            logger.info(f"Notified ADK agent that image is ready for session {session_id}")
+        else:
+            logger.info(f"No ADK agent waiting for session {session_id}")
+        
+        # Still update Firestore for mobile app coordination (command status)
+        try:
+            session_doc = db.collection('sessions').document(session_id)
+            session_doc.update({
+                'command': 'done',
+                'last_image_url': f'session:{session_id}',  # Internal reference
+                'timestamp': session_images[session_id]['timestamp']
+            })
+        except Exception as e:
+            logger.warning(f"Could not update Firestore for session {session_id}: {e}")
+        
+        return {
+            "success": True,
+            "message": "Image uploaded successfully",
+            "session_id": session_id,
+            "size": len(image_bytes)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading image for session {session_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
