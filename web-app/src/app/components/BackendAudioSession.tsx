@@ -38,10 +38,10 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
   const processingStatusRef = useRef<HTMLDivElement>(null);
   const initializingRef = useRef<boolean>(false);
 
-  // Debug logging for currentMathJax changes
-  useEffect(() => {
-    console.log('🎵 currentMathJax state changed:', currentMathJax);
-  }, [currentMathJax]);
+  // Debug logging for currentMathJax changes (disabled for cleaner logs)
+  // useEffect(() => {
+  //   console.log('🎵 currentMathJax state changed:', currentMathJax);
+  // }, [currentMathJax]);
 
   // Auto-scroll to ProcessingStatus when MathJax content updates
   useEffect(() => {
@@ -137,7 +137,10 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
   };
 
   const handleBackendMessage = (message: BackendMessage) => {
-    console.log('🔌 Backend message:', message.type, message.data);
+    // Skip logging audio messages to reduce noise
+    if (message.type !== 'audio') {
+      console.log('🔌 Backend message:', message.type);
+    }
 
     switch (message.type) {
       case 'agent_ready':
@@ -200,7 +203,6 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         const analysis = message.data?.analysis;
         
         if (analysis?.mathjax_content) {
-          console.log('🎵 Setting MathJax content from image analysis:', analysis.mathjax_content);
           setCurrentMathJax(analysis.mathjax_content);
         }
         
@@ -208,6 +210,36 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         setTimeout(() => {
           setProcessingStatus('');
         }, 2000);
+        break;
+        
+      case 'adk_event':
+        // Handle ADK events from expert help agent (same as GeminiLiveSession)
+        console.log('🔌 ADK Event received:', message);
+        if (message.data) {
+          const adkEventData = message.data as ADKEventData;
+          console.log('🔌 ADK Event data:', adkEventData);
+          const parsedResult = EventParser.parseEvent(adkEventData);
+          console.log('🔌 ADK Event parsed result:', parsedResult);
+          
+          // Update processing status
+          if (parsedResult.processingStatus) {
+            console.log('🔌 Setting processing status:', parsedResult.processingStatus);
+            setProcessingStatus(parsedResult.processingStatus);
+          }
+          
+          // Handle MathJax content updates
+          if (parsedResult.shouldUpdateMathJax && parsedResult.mathJaxContent) {
+            console.log('🔌 Setting MathJax content:', parsedResult.mathJaxContent);
+            setCurrentMathJax(parsedResult.mathJaxContent);
+          }
+          
+          // Clear processing status if analysis is complete
+          if (parsedResult.clearProcessingStatus) {
+            setTimeout(() => {
+              setProcessingStatus('');
+            }, 2000);
+          }
+        }
         break;
         
       case 'recording_started':

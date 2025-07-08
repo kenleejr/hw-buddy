@@ -97,19 +97,22 @@ class ImageUploadHandler:
                     }
                 })
             
-            # Process the image with the agent
-            analysis_result = await self.hw_agent.process_image(
+            # Store the image with the agent (expert help agent handles analysis)
+            store_result = await self.hw_agent.store_uploaded_image(
                 session_id=session_id,
                 image_data=image_data,
-                user_ask=user_ask
+                mime_type=file.content_type or "image/jpeg"
             )
             
-            # Notify frontend of analysis completion
-            if self.websocket_manager.is_connected(session_id):
-                await self.websocket_manager.send_message(session_id, "image_analyzed", {
-                    "message": "Analysis complete!",
-                    "analysis": analysis_result
-                })
+            # Create simple response - analysis is handled by expert help agent
+            analysis_result = {
+                "success": store_result["success"],
+                "problem_analysis": "Image stored successfully. Expert help agent will analyze it.",
+                "student_progress": "Image uploaded successfully",
+                "next_steps": "The expert help agent will handle detailed analysis",
+                "mathjax_content": "$$\\text{Image uploaded}$$",
+                "help_text": "Image uploaded successfully. The expert help agent will analyze it."
+            }
             
             # Prepare response
             response = {

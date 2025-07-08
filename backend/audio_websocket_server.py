@@ -109,6 +109,25 @@ class AudioWebSocketManager:
             logger.error(f"Error sending message to session {session_id}: {e}")
             self.disconnect(session_id)
     
+    async def send_event_update(self, session_id: str, event_type: str, event_data: dict):
+        """Send an ADK event update to the frontend (compatible with GeminiLiveSession)."""
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send ADK event to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "adk_event",
+            "event_type": event_type,
+            "data": event_data
+        }
+        try:
+            websocket = self.active_connections[session_id]
+            await websocket.send_text(json.dumps(message))
+            logger.info(f"Sent ADK event to session {session_id}: {event_type}")
+        except Exception as e:
+            logger.error(f"Error sending ADK event to session {session_id}: {e}")
+            self.disconnect(session_id)
+    
     async def handle_incoming_audio(self, session_id: str, audio_data: str):
         """Process incoming audio from the frontend."""
         try:
@@ -187,6 +206,9 @@ class AudioWebSocketManager:
     async def _handle_agent_event(self, session_id: str, event):
         """Handle events from the ADK Live agent."""
         try:
+            # Send ADK events for processing status updates (same as hw_tutor_agent.py)
+            await self._send_adk_event_update(session_id, event)
+            
             # Handle audio content from agent
             if event.content and event.content.parts:
                 for part in event.content.parts:
@@ -226,6 +248,67 @@ class AudioWebSocketManager:
             
         except Exception as e:
             logger.error(f"Error handling agent event for {session_id}: {e}")
+    
+    async def _send_adk_event_update(self, session_id: str, event):
+        """Send relevant ADK event updates via WebSocket (same logic as hw_tutor_agent.py)"""
+        try:
+            # Skip audio events (those with inline_data or audio/pcm mime type)
+            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                for part in event.content.parts:
+                    if hasattr(part, 'inline_data') and part.inline_data:
+                        return  # Skip audio events
+                    if hasattr(part, 'mime_type') and part.mime_type and 'audio/pcm' in part.mime_type:
+                        return  # Skip audio events
+            
+            # Analyze the event and send meaningful updates
+            event_data = {
+                "event_id": getattr(event, 'id', ''),
+                "author": getattr(event, 'author', ''),
+                "timestamp": getattr(event, 'timestamp', 0),
+                "is_final": event.is_final_response() if hasattr(event, 'is_final_response') else False
+            }
+            
+            # Check for function calls (like taking pictures)
+            function_calls = event.get_function_calls() if hasattr(event, 'get_function_calls') else []
+            if function_calls:
+                for func_call in function_calls:
+                    if func_call.name == 'take_picture_and_analyze_tool':
+                        event_data["function_call"] = {
+                            "name": func_call.name,
+                            "args": func_call.args if hasattr(func_call, 'args') else {}
+                        }
+            
+            # Check for function responses
+            function_responses = event.get_function_responses() if hasattr(event, 'get_function_responses') else []
+            if function_responses:
+                for func_response in function_responses:
+                    if func_response.name == 'take_picture_and_analyze_tool':
+                        event_data["function_response"] = {
+                            "name": func_response.name,
+                            "response": str(func_response.response) if hasattr(func_response, 'response') else ""
+                        }
+            
+            # Check for text content (agent thinking/responding)
+            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                for part in event.content.parts:
+                    if hasattr(part, 'text') and part.text:
+                        event_data["has_text_content"] = True
+                        # Include the actual content for parsing
+                        if not event_data.get("content"):
+                            event_data["content"] = {"parts": []}
+                        event_data["content"]["parts"].append({"text": part.text})
+                        break
+            
+            # Only log and send meaningful events (skip empty/audio events)
+            if event_data["author"] or event_data.get("function_call") or event_data.get("function_response") or event_data.get("has_text_content"):
+                logger.info(f"🎯 ADK Event: {event_data['author']} | Final: {event_data['is_final']} | Function: {bool(event_data.get('function_call') or event_data.get('function_response'))} | Text: {event_data.get('has_text_content', False)}")
+                if event_data.get("content"):
+                    logger.info(f"🎯 ADK Event Content: {event_data['content']}")
+                await self.send_event_update(session_id, "adk_event", event_data)
+            
+        except Exception as e:
+            logger.error(f"Error sending event update: {e}")
+            # Don't let event processing errors break the main flow
 
 
 # Global manager instance

@@ -15,7 +15,7 @@ export interface AudioMessage {
 }
 
 export interface BackendMessage {
-  type: 'audio' | 'agent_ready' | 'tool_call' | 'turn_complete' | 'interrupted' | 'error' | 'text' | 'image_received' | 'image_analyzed' | 'recording_started' | 'recording_stopped' | 'pong';
+  type: 'audio' | 'agent_ready' | 'tool_call' | 'turn_complete' | 'interrupted' | 'error' | 'text' | 'image_received' | 'image_analyzed' | 'recording_started' | 'recording_stopped' | 'pong' | 'adk_event';
   data?: any;
 }
 
@@ -283,6 +283,7 @@ export class BackendAudioClient {
       case 'image_analyzed':
       case 'recording_started':
       case 'recording_stopped':
+      case 'adk_event':
         this.onMessage?.(message);
         break;
         

@@ -39,6 +39,13 @@ export class EventParser {
     const { author, is_final, function_call, function_response, has_text_content, content } = eventData;
     
     console.log(`🔍 EventParser: Processing event from ${author}, final: ${is_final}, func_call: ${!!function_call}, func_response: ${!!function_response}, text: ${has_text_content}`);
+    if (content) {
+      console.log('🔍 EventParser: Content details:', content);
+      const textContent = this.extractTextContent(content);
+      if (textContent) {
+        console.log('🔍 EventParser: Extracted text:', textContent);
+      }
+    }
     
     const result: ParsedEventResult = {};
     
@@ -102,6 +109,9 @@ export class EventParser {
       case 'root_agent':
         return this.parseRootAgentContent(isFinal, content, result);
       
+      case 'homework_tutor':
+        return this.parseHomeworkTutorContent(isFinal, content, result);
+
       default:
         // Generic handling for unknown authors
         if (isFinal) {
@@ -121,6 +131,18 @@ export class EventParser {
     if (isFinal) {
       result.processingStatus = "Problem Identified!";
       // Don't auto-clear - let it stay until next agent updates
+      
+      // Check if content contains MathJax that should be displayed
+      const textContent = this.extractTextContent(content);
+      if (textContent) {
+        console.log('🔍 StateEstablisher final content:', textContent);
+        // If the content looks like it contains math, update MathJax display
+        if (textContent.includes('$$') || textContent.includes('$')) {
+          console.log('🔍 StateEstablisher content contains MathJax');
+          result.mathJaxContent = textContent;
+          result.shouldUpdateMathJax = true;
+        }
+      }
     } else {
       result.processingStatus = "Understanding your problem...";
     }
@@ -136,6 +158,18 @@ export class EventParser {
       result.processingStatus = "Ready to help!";
       result.analysisComplete = true;
       result.clearProcessingStatus = true; // Clear after a short delay
+      
+      // Check if content contains MathJax that should be displayed
+      const textContent = this.extractTextContent(content);
+      if (textContent) {
+        console.log('🔍 HintAgent final content:', textContent);
+        // If the content looks like it contains math, update MathJax display
+        if (textContent.includes('$$') || textContent.includes('$')) {
+          console.log('🔍 HintAgent content contains MathJax');
+          result.mathJaxContent = textContent;
+          result.shouldUpdateMathJax = true;
+        }
+      }
     } else {
       result.processingStatus = "Preparing to help...";
     }
@@ -153,6 +187,21 @@ export class EventParser {
       result.clearProcessingStatus = true;
     } else {
       result.processingStatus = "Thinking...";
+    }
+    
+    return result;
+  }
+  
+  /**
+   * Parse homework_tutor content - handles main agent listening state
+   */
+  private static parseHomeworkTutorContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
+    if (isFinal) {
+      result.processingStatus = "Ready!";
+      result.analysisComplete = true;
+      result.clearProcessingStatus = true;
+    } else {
+      result.processingStatus = "Listening...";
     }
     
     return result;
