@@ -39,6 +39,10 @@ This is the updated backend implementation using Google's ADK (Agent Development
 
 ## 🚀 Quick Start
 
+**Note**: Different Live models are availabe depending on if you are using AI Studio vs. Vertex!
+- [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/live-api)
+- [AI Studio](https://ai.google.dev/gemini-api/docs/live)
+
 ### 1. Backend Setup
 ```bash
 cd backend
@@ -57,10 +61,11 @@ export GOOGLE_APPLICATION_CREDENTIALS="path/to/firebase-service-account.json"
 
 ### 3. Start the Backend Server
 ```bash
-python main.py
+python main_live.py
 ```
 
 Or with uvicorn:
+**Note** Only this option works with ngrok
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```

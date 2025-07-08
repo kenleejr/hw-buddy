@@ -70,7 +70,7 @@ SEND_SAMPLE_RATE = 16000     # Audio input from frontend
 VOICE_NAME = "Aoede"         # Voice for responses
 
 # Model configuration
-MODEL = "gemini-2.5-flash-preview-native-audio-dialog"
+MODEL = "gemini-live-2.5-flash-preview-native-audio"
 
 # System instruction for the homework tutor
 SYSTEM_INSTRUCTION = """You are a helpful homework tutor. Be concise and wait for the student to ask for help first. 
@@ -133,7 +133,7 @@ class HWBuddyLiveAgent:
                     try:
                         cred = credentials.Certificate(service_account_path)
                         firebase_admin.initialize_app(cred, {
-                            'projectId': 'hw-buddy-66d6b'
+                            'projectId': os.environ["GOOGLE_CLOUD_PROJECT"]
                         })
                         logger.info(f"Firebase initialized with service account: {service_account_path}")
                         initialized = True
@@ -147,7 +147,7 @@ class HWBuddyLiveAgent:
                     try:
                         cred = credentials.Certificate(service_account_path)
                         firebase_admin.initialize_app(cred, {
-                            'projectId': 'hw-buddy-66d6b'
+                            'projectId': os.environ["GOOGLE_CLOUD_PROJECT"]
                         })
                         logger.info("Firebase initialized with donotinclude service account file")
                         initialized = True
@@ -160,7 +160,7 @@ class HWBuddyLiveAgent:
                     os.environ['GOOGLE_CLOUD_PROJECT'] = 'hw-buddy-66d6b'
                     cred = credentials.ApplicationDefault()
                     firebase_admin.initialize_app(cred, {
-                        'projectId': 'hw-buddy-66d6b'
+                        'projectId': os.environ["GOOGLE_CLOUD_PROJECT"]
                     })
                     logger.info("Firebase initialized with application default credentials")
                     initialized = True
@@ -334,8 +334,13 @@ class HWBuddyLiveAgent:
             # Real Gemini image analysis
             try:
                 # Create client and content for Gemini
+                # client = genai.Client(
+                #     api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+                # )
                 client = genai.Client(
-                    api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+                    vertexai=True, 
+                    project=os.environ.get("GOOGLE_CLOUD_PROJECT"), 
+                    location=os.environ.get("GOOGLE_CLOUD_LOCATION")
                 )
                 
                 # Create analysis prompt based on user question

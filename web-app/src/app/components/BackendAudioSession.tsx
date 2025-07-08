@@ -123,7 +123,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
       };
 
       // Connect to backend
-      await audioClient.connect(sessionId, 'ws://localhost:8000');
+      await audioClient.connect(sessionId, 'ws://127.0.0.1:8000');
       
       audioClientRef.current = audioClient;
       initializingRef.current = false;
