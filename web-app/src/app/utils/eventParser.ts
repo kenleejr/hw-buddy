@@ -148,13 +148,13 @@ export class EventParser {
         try {
           const jsonResponse = JSON.parse(textContent);
           if (jsonResponse && typeof jsonResponse === 'object') {
-            // Handle structured JSON response
-            const responseText = jsonResponse.response || jsonResponse.text || jsonResponse.content || textContent;
-            if (responseText.includes('$') || responseText.includes('\\')) {
-              console.log('🔍 HintAgent JSON content contains MathJax');
-              result.mathJaxContent = this.normalizeMathJax(responseText);
+            // Handle structured JSON response with specific fields
+            if (jsonResponse.mathjax_content) {
+              console.log('🔍 HintAgent JSON contains mathjax_content field');
+              result.mathJaxContent = this.normalizeMathJax(jsonResponse.mathjax_content);
               result.shouldUpdateMathJax = true;
             }
+            // help_text is handled by the live agent audio, not the frontend display
           }
         } catch (e) {
           // Handle as plain text if not valid JSON
