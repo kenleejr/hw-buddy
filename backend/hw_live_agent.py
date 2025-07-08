@@ -7,6 +7,7 @@ import asyncio
 import logging
 import traceback
 import re
+import json
 from typing import Dict, Any, Optional, AsyncIterator
 from PIL import Image
 import firebase_admin
@@ -31,6 +32,93 @@ from prompts import STATE_ESTABLISHER_AGENT_PROMPT, HINT_AGENT_PROMPT
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+def escape_mathjax_backslashes(text: str) -> str:
+    """
+    Escape backslashes in MathJax expressions for valid JSON.
+    """
+    # Pattern to match MathJax expressions (both $...$ and $$...$$)
+    # We need to escape backslashes within these expressions
+    def escape_in_math(match):
+        content = match.group(0)
+        # Double escape backslashes for JSON
+        return content.replace('\\', '\\\\')
+    
+    # Match both inline and display math
+    text = re.sub(r'\$\$[^$]*\$\$', escape_in_math, text)
+    text = re.sub(r'\$[^$]*\$', escape_in_math, text)
+    
+    return text
+
+def fix_malformed_json(json_str: str) -> str:
+    """
+    Attempt to fix common JSON formatting issues like unescaped newlines and quotes.
+    """
+    # Fix unescaped newlines in JSON string values
+    # This is a simple regex approach that handles the most common cases
+    import re
+    
+    # Pattern to find content inside double quotes that contains unescaped newlines
+    def escape_newlines_in_values(match):
+        content = match.group(1)
+        # Escape newlines and other control characters
+        content = content.replace('\n', '\\n')
+        content = content.replace('\r', '\\r')
+        content = content.replace('\t', '\\t')
+        content = content.replace('\b', '\\b')
+        content = content.replace('\f', '\\f')
+        return f'"{content}"'
+    
+    # Find and fix string values with unescaped characters
+    # Pattern matches: "key": "value with potential newlines"
+    pattern = r'"([^"]*(?:\n|\r|\t|\b|\f)[^"]*)"'
+    fixed_json = re.sub(pattern, escape_newlines_in_values, json_str)
+    
+    return fixed_json
+
+def clean_agent_response(response_text: str) -> str:
+    """
+    Clean the agent response by removing common markdown formatting.
+    Removes ```json prefix and ``` suffix that LLMs often add.
+    Also ensures proper JSON formatting by re-encoding if needed.
+    """
+    if not response_text:
+        return response_text
+    
+    # Remove ```json at the beginning (case insensitive)
+    cleaned = re.sub(r'^```json\s*', '', response_text, flags=re.IGNORECASE)
+    
+    # Remove ``` at the beginning if it's still there
+    cleaned = re.sub(r'^```\s*', '', cleaned)
+    
+    # Remove ``` at the end
+    cleaned = re.sub(r'\s*```$', '', cleaned)
+    
+    cleaned = cleaned.strip()
+    
+    # Escape backslashes in MathJax expressions for valid JSON
+    cleaned = escape_mathjax_backslashes(cleaned)
+    
+    # Try to parse and re-encode as JSON to fix any formatting issues
+    try:
+        # If it's valid JSON, parse and re-encode to ensure proper escaping
+        parsed = json.loads(cleaned)
+        # Re-encode with proper escaping
+        cleaned = json.dumps(parsed, ensure_ascii=False)
+        logger.info("Successfully re-encoded agent response as proper JSON")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Agent response has malformed JSON, attempting to fix: {e}")
+        # Try to fix common JSON issues like unescaped newlines and quotes
+        try:
+            fixed_json = fix_malformed_json(cleaned)
+            parsed = json.loads(fixed_json)
+            cleaned = json.dumps(parsed, ensure_ascii=False)
+            logger.info("Successfully fixed and re-encoded malformed JSON")
+        except Exception as fix_error:
+            logger.error(f"Could not fix malformed JSON: {fix_error}")
+            # Return the cleaned text as-is if we can't fix it
+    
+    return cleaned
 
 def extract_mathjax_content(text: str) -> str:
     """Extract MathJax content from Gemini response or return a basic format."""
@@ -356,18 +444,35 @@ class HWBuddyLiveAgent:
                             for part in event.content.parts:
                                 logger.info(f"Checking part: {part}")
                                 if hasattr(part, 'text') and part.text:
-                                    logger.info(f"Found text in part: {part.text}")
-                                    # Clean the response text to remove markdown formatting
-                                    logger.info(f"Cleaned response text: {response_text}")
+                                    logger.info(f"🔍 Expert help agent final output: {part.text}")
                                     
-                                    # Store the response text (no image URLs for live agent)
+                                    # Store the response text (cleaning now happens in event forwarding)
                                     final_response_data = {
                                         "response": part.text
                                     }
                 
                 # Return the final response if we found one
                 if final_response_data:
-                    final_response = final_response_data["response"]
+                    raw_response = final_response_data["response"]
+                    
+                    # Clean the response and extract help_text for the live agent to recite
+                    cleaned_response = clean_agent_response(raw_response)
+                    logger.info(f"🔍 Cleaned expert help response: {cleaned_response}")
+                    
+                    # Try to parse as JSON and extract help_text
+                    try:
+                        parsed_response = json.loads(cleaned_response)
+                        if isinstance(parsed_response, dict) and "help_text" in parsed_response:
+                            final_response = parsed_response["help_text"]
+                            logger.info(f"🔍 Extracted help_text for live agent: {final_response}")
+                        else:
+                            # Fallback to cleaned response if no help_text found
+                            final_response = cleaned_response
+                            logger.info("🔍 No help_text found, using cleaned response")
+                    except json.JSONDecodeError:
+                        # Fallback to cleaned response if not valid JSON
+                        final_response = cleaned_response
+                        logger.info("🔍 Response not valid JSON, using cleaned response")
                 
                 logger.info(f"Expert help completed for session {current_session_id}")
                 return final_response or "I've analyzed your homework and provided guidance above."

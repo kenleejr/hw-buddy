@@ -1,3 +1,4 @@
+
 /**
  * EventParser class for handling ADK event parsing based on author, function calls, and event state
  */
@@ -39,13 +40,6 @@ export class EventParser {
     const { author, is_final, function_call, function_response, has_text_content, content } = eventData;
     
     console.log(`🔍 EventParser: Processing event from ${author}, final: ${is_final}, func_call: ${!!function_call}, func_response: ${!!function_response}, text: ${has_text_content}`);
-    if (content) {
-      console.log('🔍 EventParser: Content details:', content);
-      const textContent = this.extractTextContent(content);
-      if (textContent) {
-        console.log('🔍 EventParser: Extracted text:', textContent);
-      }
-    }
     
     const result: ParsedEventResult = {};
     
@@ -109,9 +103,6 @@ export class EventParser {
       case 'root_agent':
         return this.parseRootAgentContent(isFinal, content, result);
       
-      case 'homework_tutor':
-        return this.parseHomeworkTutorContent(isFinal, content, result);
-
       default:
         // Generic handling for unknown authors
         if (isFinal) {
@@ -131,18 +122,6 @@ export class EventParser {
     if (isFinal) {
       result.processingStatus = "Problem Identified!";
       // Don't auto-clear - let it stay until next agent updates
-      
-      // Check if content contains MathJax that should be displayed
-      const textContent = this.extractTextContent(content);
-      if (textContent) {
-        console.log('🔍 StateEstablisher final content:', textContent);
-        // If the content looks like it contains math, update MathJax display
-        if (textContent.includes('$$') || textContent.includes('$')) {
-          console.log('🔍 StateEstablisher content contains MathJax');
-          result.mathJaxContent = textContent;
-          result.shouldUpdateMathJax = true;
-        }
-      }
     } else {
       result.processingStatus = "Understanding your problem...";
     }
@@ -162,12 +141,28 @@ export class EventParser {
       // Check if content contains MathJax that should be displayed
       const textContent = this.extractTextContent(content);
       if (textContent) {
-        console.log('🔍 HintAgent final content:', textContent);
-        // If the content looks like it contains math, update MathJax display
-        if (textContent.includes('$$') || textContent.includes('$')) {
-          console.log('🔍 HintAgent content contains MathJax');
-          result.mathJaxContent = textContent;
-          result.shouldUpdateMathJax = true;
+        console.log('🔍 HintAgent final content from backend:', textContent);
+        
+        // Backend has already cleaned and parsed the JSON, so we can use it directly
+        // Try to parse as JSON first (for structured responses that backend processed)
+        try {
+          const jsonResponse = JSON.parse(textContent);
+          if (jsonResponse && typeof jsonResponse === 'object') {
+            // Handle structured JSON response
+            const responseText = jsonResponse.response || jsonResponse.text || jsonResponse.content || textContent;
+            if (responseText.includes('$') || responseText.includes('\\')) {
+              console.log('🔍 HintAgent JSON content contains MathJax');
+              result.mathJaxContent = this.normalizeMathJax(responseText);
+              result.shouldUpdateMathJax = true;
+            }
+          }
+        } catch (e) {
+          // Handle as plain text if not valid JSON
+          if (textContent.includes('$') || textContent.includes('\\')) {
+            console.log('🔍 HintAgent content contains MathJax');
+            result.mathJaxContent = this.normalizeMathJax(textContent);
+            result.shouldUpdateMathJax = true;
+          }
         }
       }
     } else {
@@ -192,51 +187,6 @@ export class EventParser {
     return result;
   }
   
-  /**
-   * Parse homework_tutor content - handles main agent listening state
-   */
-  private static parseHomeworkTutorContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
-    if (isFinal) {
-      result.processingStatus = "Ready!";
-      result.analysisComplete = true;
-      result.clearProcessingStatus = true;
-    } else {
-      result.processingStatus = "Listening...";
-    }
-    
-    return result;
-  }
-  
-  /**
-   * Post-process MathJax content for better formatting
-   */
-  private static postProcessMathJax(content: string): string {
-    if (!content) return content;
-    
-    let processed = content;
-    
-    // Ensure proper spacing around display equations
-    processed = processed.replace(/\$\$([^$]+)\$\$/g, (match, equation) => {
-      return `\n\n$$${equation.trim()}$$\n\n`;
-    });
-    
-    // Clean up multiple consecutive newlines (max 2)
-    processed = processed.replace(/\n{3,}/g, '\n\n');
-    
-    // Ensure sections have proper spacing
-    processed = processed.replace(/(\*\*[^*]+\*\*)\s*([^*])/g, '$1\n\n$2');
-    
-    // Fix inline math spacing
-    processed = processed.replace(/\s+\$([^$]+)\$\s+/g, ' $$$1$$ ');
-    
-    // Ensure equations after text descriptions have proper spacing
-    processed = processed.replace(/([a-zA-Z:]\s*)\$\$/g, '$1\n\n$$');
-    
-    // Clean up leading/trailing whitespace
-    processed = processed.trim();
-    
-    return processed;
-  }
 
   /**
    * Helper method to extract text content from event parts
@@ -249,5 +199,19 @@ export class EventParser {
       .filter(text => text.trim())
       .join(' ')
       .trim();
+  }
+
+
+  /**
+   * Normalize MathJax expressions to ensure proper rendering
+   */
+  private static normalizeMathJax(content: string): string {
+    // Ensure proper escaping for MathJax delimiters
+    let normalized = content;
+    
+    // Fix common MathJax issues
+    normalized = normalized.replace(/\\\\/g, '\\');
+    
+    return normalized;
   }
 }

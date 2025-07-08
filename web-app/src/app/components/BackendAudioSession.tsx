@@ -9,6 +9,17 @@ import { ChatPanel } from '@/components/ui/chat-panel';
 import { ProcessingStatus } from './ProcessingStatus';
 import { MathJaxDisplay } from './MathJaxDisplay';
 
+// Helper function to normalize backslashes for MathJax (from GeminiLiveSession)
+const normalizeMathJaxBackslashes = (content: string): string => {
+  if (!content) return content;
+  
+  // Replace double backslashes with single backslashes for proper MathJax rendering
+  return content
+    .replace(/\\\\/g, '\\')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t');
+};
+
 interface BackendAudioSessionProps {
   sessionId: string;
   onEndSession: () => void;
@@ -213,33 +224,41 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         break;
         
       case 'adk_event':
-        // Handle ADK events from expert help agent (same as GeminiLiveSession)
-        console.log('🔌 ADK Event received:', message);
-        if (message.data) {
-          const adkEventData = message.data as ADKEventData;
-          console.log('🔌 ADK Event data:', adkEventData);
-          const parsedResult = EventParser.parseEvent(adkEventData);
-          console.log('🔌 ADK Event parsed result:', parsedResult);
-          
-          // Update processing status
-          if (parsedResult.processingStatus) {
-            console.log('🔌 Setting processing status:', parsedResult.processingStatus);
-            setProcessingStatus(parsedResult.processingStatus);
-          }
-          
-          // Handle MathJax content updates
-          if (parsedResult.shouldUpdateMathJax && parsedResult.mathJaxContent) {
-            console.log('🔌 Setting MathJax content:', parsedResult.mathJaxContent);
-            setCurrentMathJax(parsedResult.mathJaxContent);
-          }
-          
-          // Clear processing status if analysis is complete
-          if (parsedResult.clearProcessingStatus) {
-            setTimeout(() => {
-              setProcessingStatus('');
-            }, 2000);
-          }
+        console.log('🔌 ADK Event:', message.event_type, message.data);
+        
+        // Use EventParser to handle the event (same as GeminiLiveSession)
+        const eventData: ADKEventData = {
+          event_id: message.data.event_id || '',
+          author: message.data.author || '',
+          timestamp: message.data.timestamp || 0,
+          is_final: message.data.is_final || false,
+          function_call: message.data.function_call,
+          function_response: message.data.function_response,
+          has_text_content: message.data.has_text_content,
+          content: message.data.content
+        };
+        
+        const parseResult = EventParser.parseEvent(eventData);
+        
+        // Apply the parsing results
+        if (parseResult.processingStatus) {
+          setProcessingStatus(parseResult.processingStatus);
         }
+        
+        if (parseResult.shouldUpdateMathJax && parseResult.mathJaxContent) {
+          console.log('🔌 Updating MathJax from EventParser:', parseResult.mathJaxContent);
+          const normalizedMathJax = normalizeMathJaxBackslashes(parseResult.mathJaxContent);
+          console.log('🔌 Setting MathJax content (normalized):', normalizedMathJax);
+          setCurrentMathJax(normalizedMathJax);
+        }
+        
+        if (parseResult.clearProcessingStatus) {
+          // Clear processing status after a delay
+          setTimeout(() => {
+            setProcessingStatus('');
+          }, 2000);
+        }
+        
         break;
         
       case 'recording_started':
