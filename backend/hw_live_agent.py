@@ -33,6 +33,13 @@ from prompts import STATE_ESTABLISHER_AGENT_PROMPT, HINT_AGENT_PROMPT
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Disable verbose logging from Google ADK modules
+logging.getLogger('google_adk.google.adk.models.google_llm').setLevel(logging.WARNING)
+logging.getLogger('google.adk.models.google_llm').setLevel(logging.WARNING)
+logging.getLogger('google_genai.models').setLevel(logging.WARNING)
+logging.getLogger('google_genai.types').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 def escape_mathjax_backslashes(text: str) -> str:
     """
     Escape backslashes in MathJax expressions for valid JSON.
@@ -164,12 +171,12 @@ VOICE_NAME = "Aoede"         # Voice for responses
 MODEL = "gemini-2.0-flash-live-001"
 
 # System instruction for the homework tutor
-SYSTEM_INSTRUCTION = """You are a homework buddy assistant. \
-              When a user asks you anything, first respond with affirmative that you can help and then in order to help them you must call the get_expert_help function. \
+SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your sole responsibility is to relay information such as user questions to a backend expert help agent.  \
+              When the agent returns, you relay its response back to the user. \
+              When a user asks you for help you need to call the get_expert_help function. \
+              This calls an agent which will take a picture of their homework and give you guidance on how to help them. \
               Pass the user's specific question or request as the 'user_ask' parameter to the get_expert_help function. \
-              This function will analyze the student's progress and provide next steps specifically tailored to the user's request. Note: this can take some time. While waiting do not say anything. \
-              Do NOT supply help outside of the results of this function's result. \
-              When a response returns, simply relay the function's response to the user, as it contains pointers to the student."""
+              This function will analyze the student's progress and return with "help_text" which you can relay back to the user."""
 
 
 class HWBuddyLiveAgent:
@@ -359,6 +366,31 @@ class HWBuddyLiveAgent:
             func=create_take_picture_function(self)
         )
         
+        # Create before tool callback for rate limiting take_picture calls
+        def before_tool_callback_rate_limiter(tool, args, tool_context):
+            """Rate limit take_picture_and_analyze_tool calls to prevent rapid-fire requests."""
+            import time
+            
+            # Only apply rate limiting to the take_picture tool
+            if tool.name != 'take_picture_and_analyze_tool':
+                return None
+            
+            current_time = time.time()
+            last_tool_call_time = tool_context.state.get("last_take_picture_call_time", 0)
+            time_since_last_call = current_time - last_tool_call_time
+            
+            # Rate limiting: Only allow one take_picture call every 10 seconds
+            if time_since_last_call < 10.0 and last_tool_call_time > 0:
+                logger.info(f"⚠️ Tool rate limiting: take_picture called {time_since_last_call:.1f}s ago, rejecting duplicate request")
+                # Return a dictionary to skip the tool execution and provide a canned response
+                return {"result": "Please wait a moment - still processing your previous image request..."}
+            
+            # Update the last call time and allow the tool to proceed
+            tool_context.state["last_take_picture_call_time"] = current_time
+            logger.info(f"✅ Take picture tool call allowed, updating last call time to {current_time}")
+            
+            return None  # Allow the tool to proceed normally
+        
         # Create the hint agent
         hint_agent = LlmAgent(
             name="HintAgent",
@@ -372,18 +404,40 @@ class HWBuddyLiveAgent:
             model="gemini-2.5-flash",
             tools=[take_picture_tool],
             before_model_callback=inject_image_callback,
+            before_tool_callback=before_tool_callback_rate_limiter,
             output_key="problem_at_hand",
             instruction=STATE_ESTABLISHER_AGENT_PROMPT
         )
         
-        # Create before agent callback
+        # Create before agent callback with rate limiting
         async def before_agent_callback1(callback_context: CallbackContext) -> Optional[Content]:
+            import time
+            
+            current_time = time.time()
+            last_call_time = callback_context.state.get("last_expert_call_time", 0)
+            time_since_last_call = current_time - last_call_time
+            
+            # Rate limiting: Only allow one call every 15 seconds
+            if time_since_last_call < 15.0 and last_call_time > 0:
+                logger.info(f"⚠️ Rate limiting: Expert help called {time_since_last_call:.1f}s ago, rejecting duplicate request")
+                # Return content to skip the agent and respond with rate limit message
+                return Content(
+                    parts=[Part(text="Still processing your previous request. Please wait a moment...")],
+                    role="model"
+                )
+            
+            # Update the last call time
+            callback_context.state["last_expert_call_time"] = current_time
+            logger.info(f"✅ Expert help request allowed, updating last call time to {current_time}")
+            
+            # Original logic for user interaction tracking
             user_interaction_count = callback_context.state.get("user_interaction_count", 0)
             if user_interaction_count == 0:
                 callback_context.state["problem_at_hand"] = "None"
             elif callback_context.state.get("problem_at_hand", None):
                 callback_context.state["problem_at_hand"] = "None"
             callback_context.state["user_interaction_count"] = user_interaction_count + 1
+            
             return None
         
         # Create the sequential agent
@@ -456,8 +510,9 @@ class HWBuddyLiveAgent:
                     await forward_events(current_session_id, event)
                     
                     # Check if this is a final response but don't return yet - collect it
-                    if event.is_final_response() and not final_response_data and event.author == "root_agent":
-                        logger.info("Found final response event!")
+                    # Look for final responses from any of the expert agents
+                    if event.is_final_response() and not final_response_data and event.author in ["root_agent", "expert_help_agent", "HintAgent"]:
+                        logger.info(f"Found final response event from {event.author}!")
                         # Extract text content
                         if event.content:
                             for part in event.content.parts:
@@ -469,6 +524,7 @@ class HWBuddyLiveAgent:
                                     final_response_data = {
                                         "response": part.text
                                     }
+                                    break
                 
                 # Return the final response if we found one
                 if final_response_data:
