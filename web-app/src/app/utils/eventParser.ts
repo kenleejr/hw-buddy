@@ -30,6 +30,8 @@ export interface ParsedEventResult {
   shouldUpdateMathJax?: boolean;
   analysisComplete?: boolean;
   clearProcessingStatus?: boolean;
+  visualizationConfig?: any;
+  shouldShowVisualization?: boolean;
 }
 
 export class EventParser {
@@ -97,8 +99,14 @@ export class EventParser {
       case 'StateEstablisher':
         return this.parseStateEstablisherContent(isFinal, content, result);
       
+      case 'HelpTriageAgent':
+        return this.parseHelpTriageAgentContent(isFinal, content, result);
+      
       case 'HintAgent':
         return this.parseHintAgentContent(isFinal, content, result);
+      
+      case 'VisualizerAgent':
+        return this.parseVisualizerAgentContent(isFinal, content, result);
       
       case 'expert_help_agent':
         return this.parseExpertHelpAgentContent(isFinal, content, result);
@@ -185,6 +193,53 @@ export class EventParser {
     } else {
       // Don't update status for intermediate expert help events to avoid jumpiness
       // The StateEstablisher and HintAgent will provide more specific status updates
+    }
+    
+    return result;
+  }
+
+  /**
+   * Parse HelpTriageAgent content - handles decision making between hint and visualization
+   */
+  private static parseHelpTriageAgentContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
+    if (isFinal) {
+      result.processingStatus = "Solution ready!";
+      result.analysisComplete = true;
+      result.clearProcessingStatus = true;
+    } else {
+      result.processingStatus = "Choosing best approach...";
+    }
+    
+    return result;
+  }
+
+  /**
+   * Parse VisualizerAgent content - handles visualization generation
+   */
+  private static parseVisualizerAgentContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
+    if (isFinal) {
+      result.processingStatus = "Visualization ready!";
+      result.analysisComplete = true;
+      result.clearProcessingStatus = true;
+      
+      // Check if content contains visualization configuration
+      const textContent = this.extractTextContent(content);
+      if (textContent) {
+        console.log('🔍 VisualizerAgent final content:', textContent);
+        
+        try {
+          const jsonResponse = JSON.parse(textContent);
+          if (jsonResponse && typeof jsonResponse === 'object' && jsonResponse.chart_config) {
+            console.log('🔍 VisualizerAgent contains chart configuration');
+            result.visualizationConfig = jsonResponse;
+            result.shouldShowVisualization = true;
+          }
+        } catch (e) {
+          console.log('🔍 VisualizerAgent content not valid JSON:', e);
+        }
+      }
+    } else {
+      result.processingStatus = "Creating visualization...";
     }
     
     return result;

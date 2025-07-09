@@ -127,6 +127,46 @@ def clean_agent_response(response_text: str) -> str:
     
     return cleaned
 
+def clean_visualization_response(response_text: str) -> str:
+    """
+    Clean visualization agent response by removing markdown formatting.
+    Same as clean_agent_response but without MathJax escaping since visualizations don't need it.
+    """
+    if not response_text:
+        return response_text
+    
+    # Remove ```json at the beginning (case insensitive)
+    cleaned = re.sub(r'^```json\s*', '', response_text, flags=re.IGNORECASE)
+    
+    # Remove ``` at the beginning if it's still there
+    cleaned = re.sub(r'^```\s*', '', cleaned)
+    
+    # Remove ``` at the end
+    cleaned = re.sub(r'\s*```$', '', cleaned)
+    
+    cleaned = cleaned.strip()
+    
+    # Try to parse and re-encode as JSON to fix any formatting issues
+    try:
+        # If it's valid JSON, parse and re-encode to ensure proper escaping
+        parsed = json.loads(cleaned)
+        # Re-encode with proper escaping
+        cleaned = json.dumps(parsed, ensure_ascii=False)
+        logger.info("Successfully re-encoded visualization response as proper JSON")
+    except json.JSONDecodeError as e:
+        logger.warning(f"Visualization response has malformed JSON, attempting to fix: {e}")
+        # Try to fix common JSON issues like unescaped newlines and quotes
+        try:
+            fixed_json = fix_malformed_json(cleaned)
+            parsed = json.loads(fixed_json)
+            cleaned = json.dumps(parsed, ensure_ascii=False)
+            logger.info("Successfully fixed and re-encoded malformed visualization JSON")
+        except Exception as fix_error:
+            logger.error(f"Could not fix malformed visualization JSON: {fix_error}")
+            # Return the cleaned text as-is if we can't fix it
+    
+    return cleaned
+
 def extract_mathjax_content(text: str) -> str:
     """Extract MathJax content from Gemini response or return a basic format."""
     # Look for existing MathJax patterns
@@ -380,7 +420,7 @@ class HWBuddyLiveAgent:
             time_since_last_call = current_time - last_tool_call_time
             
             # Rate limiting: Only allow one take_picture call every 10 seconds
-            if time_since_last_call < 10.0 and last_tool_call_time > 0:
+            if time_since_last_call < 5.0 and last_tool_call_time > 0:
                 logger.info(f"⚠️ Tool rate limiting: take_picture called {time_since_last_call:.1f}s ago, rejecting duplicate request")
                 # Return a dictionary to skip the tool execution and provide a canned response
                 return {"result": "Please wait a moment - still processing your previous image request..."}
@@ -391,11 +431,64 @@ class HWBuddyLiveAgent:
             
             return None  # Allow the tool to proceed normally
         
-        # Create the hint agent
+        # Create the hint agent (will be used as a tool)
         hint_agent = LlmAgent(
             name="HintAgent",
             model="gemini-2.5-flash",
             instruction=HINT_AGENT_PROMPT
+        )
+        
+        # Create the visualizer agent (will be used as a tool)
+        visualizer_agent = LlmAgent(
+            name="VisualizerAgent",
+            model="gemini-2.5-flash",
+            instruction="""You are a visualization expert for math problems. Your job is to create interactive Chart.js visualizations to help students understand mathematical concepts.
+
+Given a problem description, generate JavaScript code that creates a Chart.js visualization. Focus on:
+- Systems of equations: Plot lines on a coordinate plane
+- Quadratic functions: Show parabolas with key features
+- Linear functions: Show lines with slope and intercepts
+- Data analysis: Create appropriate charts for datasets
+
+Return ONLY a JSON object with this structure:
+{
+  "visualization_type": "linear_system|quadratic|linear|data_chart",
+  "chart_config": {
+    // Complete Chart.js configuration object
+  },
+  "explanation": "Brief explanation of what the visualization shows and how it helps"
+}
+
+The chart_config should be a complete Chart.js configuration that can be passed directly to new Chart().
+Use meaningful colors, labels, and formatting. Include gridlines and axis labels."""
+        )
+        
+        # Create the help triage agent that decides between hint and visualization
+        help_triage_agent = LlmAgent(
+            name="HelpTriageAgent", 
+            model="gemini-2.5-flash",
+            sub_agents=[hint_agent, visualizer_agent],
+            instruction="""You are a tutoring coordinator that decides the best way to help a student based on their question and the problem they're working on.
+
+You have access to two tools:
+1. "HintAgent" - Provides step-by-step hints and guidance
+2. "VisualizerAgent" - Creates interactive visualizations (charts, graphs)
+
+Given the user's question: {pending_user_ask} and the problem description: {problem_at_hand}, decide which approach would be most helpful:
+
+Use HintAgent when:
+- Student needs single next step hint
+- Problem involves algebraic manipulation
+- Student is stuck on a specific step
+- Conceptual explanation is needed
+
+Use VisualizerAgent when:
+- Problem involves systems of equations (2+ variables)
+- Graphing or plotting would help understanding
+- Student would benefit from seeing the visual representation
+- Problem involves functions, lines, parabolas, or data
+
+Always call exactly ONE tool based on your analysis. Pass the full context including both the user's question and the problem description to the chosen tool."""
         )
         
         # Create the state establisher agent
@@ -418,7 +511,7 @@ class HWBuddyLiveAgent:
             time_since_last_call = current_time - last_call_time
             
             # Rate limiting: Only allow one call every 15 seconds
-            if time_since_last_call < 15.0 and last_call_time > 0:
+            if time_since_last_call < 5.0 and last_call_time > 0:
                 logger.info(f"⚠️ Rate limiting: Expert help called {time_since_last_call:.1f}s ago, rejecting duplicate request")
                 # Return content to skip the agent and respond with rate limit message
                 return Content(
@@ -440,11 +533,11 @@ class HWBuddyLiveAgent:
             
             return None
         
-        # Create the sequential agent
+        # Create the sequential agent with new architecture
         expert_agent = SequentialAgent(
             name="expert_help_agent",
             before_agent_callback=[before_agent_callback1],
-            sub_agents=[state_establisher_agent, hint_agent]
+            sub_agents=[state_establisher_agent, help_triage_agent]
         )
         
         return expert_agent
@@ -508,10 +601,11 @@ class HWBuddyLiveAgent:
                 ):
                     # Forward events to the main session for frontend updates
                     await forward_events(current_session_id, event)
+                    logger.info(f"Event from agent {event.author}")
                     
                     # Check if this is a final response but don't return yet - collect it
                     # Look for final responses from any of the expert agents
-                    if event.is_final_response() and not final_response_data and event.author in ["root_agent", "expert_help_agent", "HintAgent"]:
+                    if event.is_final_response() and not final_response_data and event.author in ["root_agent", "expert_help_agent", "VisualizerAgent", "HintAgent"]:
                         logger.info(f"Found final response event from {event.author}!")
                         # Extract text content
                         if event.content:

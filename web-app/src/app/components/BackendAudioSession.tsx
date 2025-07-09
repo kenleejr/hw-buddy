@@ -8,6 +8,7 @@ import { CentralStartButton } from '@/components/ui/central-start-button';
 import { ChatPanel } from '@/components/ui/chat-panel';
 import { ProcessingStatus } from './ProcessingStatus';
 import { MathJaxDisplay } from './MathJaxDisplay';
+import VisualizationPanel from './VisualizationPanel';
 
 // Helper function to normalize backslashes for MathJax (from GeminiLiveSession)
 const normalizeMathJaxBackslashes = (content: string): string => {
@@ -44,6 +45,8 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
   const [currentMathJax, setCurrentMathJax] = useState('');
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [processingStatus, setProcessingStatus] = useState('');
+  const [visualizationConfig, setVisualizationConfig] = useState<any>(null);
+  const [showVisualization, setShowVisualization] = useState(false);
   
   const audioClientRef = useRef<BackendAudioClient | null>(null);
   const processingStatusRef = useRef<HTMLDivElement>(null);
@@ -251,6 +254,13 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
           console.log('🔌 Setting MathJax content (normalized):', normalizedMathJax);
           setCurrentMathJax(normalizedMathJax);
         }
+
+        // Handle visualization updates
+        if (parseResult.shouldShowVisualization && parseResult.visualizationConfig) {
+          console.log('🔌 Updating visualization from EventParser:', parseResult.visualizationConfig);
+          setVisualizationConfig(parseResult.visualizationConfig);
+          setShowVisualization(true);
+        }
         
         if (parseResult.clearProcessingStatus) {
           // Clear processing status after a delay
@@ -365,13 +375,16 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         )}
         
         {/* Main Content - Show when there's activity */}
-        {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording || currentMathJax) && (
+        {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording || currentMathJax || showVisualization) && (
           <div className="space-y-8">
-            {/* MathJax Display - Front and Center */}
-            <MathJaxDisplay content={currentMathJax} />
-            
-            {/* Processing Status - Below MathJax */}
-            <ProcessingStatus ref={processingStatusRef} status={processingStatus} />
+            {/* Content Container with responsive layout */}
+            <div className={`transition-all duration-300 ${showVisualization ? 'pr-[45%]' : ''}`}>
+              {/* MathJax Display - Front and Center */}
+              <MathJaxDisplay content={currentMathJax} />
+              
+              {/* Processing Status - Below MathJax */}
+              <ProcessingStatus ref={processingStatusRef} status={processingStatus} />
+            </div>
             
             {/* Chat Panel - Hidden by default, can be toggled if needed */}
             <div className="hidden">
@@ -387,6 +400,13 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
             </div>
           </div>
         )}
+
+        {/* Visualization Panel - Slides in from the right */}
+        <VisualizationPanel
+          config={visualizationConfig}
+          isVisible={showVisualization}
+          onClose={() => setShowVisualization(false)}
+        />
         
         {/* Error State */}
         {error && (

@@ -10,7 +10,7 @@ import base64
 import traceback
 from typing import Dict, Set
 from fastapi import WebSocket, WebSocketDisconnect
-from hw_live_agent import get_hw_live_agent, clean_agent_response
+from hw_live_agent import get_hw_live_agent, clean_agent_response, clean_visualization_response
 
 logger = logging.getLogger(__name__)
 
@@ -296,12 +296,15 @@ class AudioWebSocketManager:
                         if not event_data.get("content"):
                             event_data["content"] = {"parts": []}
                         
-                        # Clean HintAgent final responses before forwarding
+                        # Clean agent final responses before forwarding
                         processed_text = part.text
-                        if (event_data["author"] == "HintAgent" and 
-                            event_data.get("is_final", False)):
-                            processed_text = clean_agent_response(part.text)
-                            logger.debug(f"🔍 Cleaned HintAgent final response: {processed_text}")
+                        if event_data.get("is_final", False):
+                            if event_data["author"] == "HintAgent":
+                                processed_text = clean_agent_response(part.text)
+                                logger.debug(f"🔍 Cleaned HintAgent final response: {processed_text}")
+                            elif event_data["author"] == "VisualizerAgent":
+                                processed_text = clean_visualization_response(part.text)
+                                logger.debug(f"🔍 Cleaned VisualizerAgent final response: {processed_text}")
                         
                         event_data["content"]["parts"].append({"text": processed_text})
                         break

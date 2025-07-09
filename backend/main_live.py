@@ -24,6 +24,41 @@ from hw_live_agent import get_hw_live_agent
 from audio_websocket_server import get_audio_websocket_manager
 from image_upload_handler import get_image_upload_handler
 
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk import trace as trace_sdk
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry import trace
+
+import base64
+import os
+# Load sensitive values from environment variables
+WANDB_BASE_URL = "https://trace.wandb.ai"
+# Your W&B entity/project name e.g. "myteam/myproject"
+PROJECT_ID = os.environ.get("WANDB_PROJECT_ID")  
+# Your W&B API key (found at https://wandb.ai/authorize)
+WANDB_API_KEY = os.environ.get("WANDB_API_KEY")  
+
+OTEL_EXPORTER_OTLP_ENDPOINT = f"{WANDB_BASE_URL}/otel/v1/traces"
+AUTH = base64.b64encode(f"api:{WANDB_API_KEY}".encode()).decode()
+
+OTEL_EXPORTER_OTLP_HEADERS = {
+    "Authorization": f"Basic {AUTH}",
+    "project_id": PROJECT_ID,
+}
+
+# Create the OTLP span exporter with endpoint and headers
+exporter = OTLPSpanExporter(
+    endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
+    headers=OTEL_EXPORTER_OTLP_HEADERS,
+)
+
+# Create a tracer provider and add the exporter
+tracer_provider = trace_sdk.TracerProvider()
+tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+# Set the global tracer provider BEFORE importing/using ADK
+trace.set_tracer_provider(tracer_provider)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
