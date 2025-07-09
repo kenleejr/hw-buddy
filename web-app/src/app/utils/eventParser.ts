@@ -100,18 +100,17 @@ export class EventParser {
       case 'HintAgent':
         return this.parseHintAgentContent(isFinal, content, result);
       
-      case 'root_agent':
-        return this.parseRootAgentContent(isFinal, content, result);
+      case 'expert_help_agent':
+        return this.parseExpertHelpAgentContent(isFinal, content, result);
+      
+      case 'homework_tutor':
+        return this.parseHomeworkTutorContent(isFinal, content, result);
       
       default:
-        // Generic handling for unknown authors
-        if (isFinal) {
-          result.processingStatus = "Ready!";
-          result.analysisComplete = true;
-        } else {
-          result.processingStatus = "Thinking...";
-        }
-        return result;
+        // For unknown authors, don't update status to avoid jumpiness
+        // Only log for debugging
+        console.log(`🔍 Unknown event author: ${author}, final: ${isFinal}`);
+        return result; // Return empty result - no status update
     }
   }
   
@@ -119,10 +118,12 @@ export class EventParser {
    * Parse StateEstablisher content - handles problem state and MathJax
    */
   private static parseStateEstablisherContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
+    // Only update status for significant state changes
     if (isFinal) {
-      result.processingStatus = "Problem Identified!";
-      // Don't auto-clear - let it stay until next agent updates
+      result.processingStatus = "Problem identified!";
+      // Don't auto-clear - let it stay until HintAgent provides final response
     } else {
+      // Only show status during non-final events if it's meaningful
       result.processingStatus = "Understanding your problem...";
     }
     
@@ -166,25 +167,37 @@ export class EventParser {
         }
       }
     } else {
-      result.processingStatus = "Preparing to help...";
+      // Only show intermediate status for HintAgent if it's meaningful
+      result.processingStatus = "Analyzing your work...";
     }
     
     return result;
   }
   
   /**
-   * Parse root_agent content - handles final orchestration
+   * Parse expert_help_agent content - handles expert analysis workflow
    */
-  private static parseRootAgentContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
+  private static parseExpertHelpAgentContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
     if (isFinal) {
-      result.processingStatus = "Ready!";
+      result.processingStatus = "Analysis complete!";
       result.analysisComplete = true;
       result.clearProcessingStatus = true;
     } else {
-      result.processingStatus = "Thinking...";
+      // Don't update status for intermediate expert help events to avoid jumpiness
+      // The StateEstablisher and HintAgent will provide more specific status updates
     }
     
     return result;
+  }
+
+  /**
+   * Parse homework_tutor content - handles main live agent
+   */
+  private static parseHomeworkTutorContent(isFinal: boolean, content?: { parts: Array<{ text?: string }> }, result: ParsedEventResult = {}): ParsedEventResult {
+    // The homework_tutor is the main live agent that coordinates everything
+    // We generally don't want to show status from this agent as it can be confusing
+    // The expert help agents provide better status updates
+    return result; // No status updates from main tutor agent
   }
   
 
