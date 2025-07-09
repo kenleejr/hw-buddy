@@ -123,7 +123,6 @@ class AudioWebSocketManager:
         try:
             websocket = self.active_connections[session_id]
             await websocket.send_text(json.dumps(message))
-            logger.info(f"Sent ADK event to session {session_id}: {event_type}")
         except Exception as e:
             logger.error(f"Error sending ADK event to session {session_id}: {e}")
             self.disconnect(session_id)
@@ -301,18 +300,15 @@ class AudioWebSocketManager:
                         processed_text = part.text
                         if (event_data["author"] == "HintAgent" and 
                             event_data.get("is_final", False)):
-                            logger.info(f"🔍 Raw HintAgent final response: {part.text}")
                             processed_text = clean_agent_response(part.text)
-                            logger.info(f"🔍 Cleaned HintAgent final response: {processed_text}")
+                            logger.debug(f"🔍 Cleaned HintAgent final response: {processed_text}")
                         
                         event_data["content"]["parts"].append({"text": processed_text})
                         break
             
             # Only log and send meaningful events (skip empty/audio events)
             if event_data["author"] or event_data.get("function_call") or event_data.get("function_response") or event_data.get("has_text_content"):
-                logger.info(f"🎯 ADK Event: {event_data['author']} | Final: {event_data['is_final']} | Function: {bool(event_data.get('function_call') or event_data.get('function_response'))} | Text: {event_data.get('has_text_content', False)}")
-                if event_data.get("content"):
-                    logger.info(f"🎯 ADK Event Content: {event_data['content']}")
+                # Only log significant events to reduce noise
                 await self.send_event_update(session_id, "adk_event", event_data)
             
         except Exception as e:

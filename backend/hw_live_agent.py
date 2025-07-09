@@ -161,7 +161,7 @@ SEND_SAMPLE_RATE = 16000     # Audio input from frontend
 VOICE_NAME = "Aoede"         # Voice for responses
 
 # Model configuration
-MODEL = "gemini-live-2.5-flash-preview-native-audio"
+MODEL = "gemini-2.0-flash-live-001"
 
 # System instruction for the homework tutor
 SYSTEM_INSTRUCTION = """You are a homework buddy assistant. \
@@ -188,18 +188,6 @@ class HWBuddyLiveAgent:
         # Initialize Firebase for Firestore communication
         self._init_firebase()
         
-        # Define dummy before_model_callback for testing
-        def dummy_before_model_callback(callback_context, llm_request):
-            """
-            Dummy callback that logs when it's triggered to test callback functionality.
-            """
-            logger.info("🔥 BEFORE_MODEL_CALLBACK TRIGGERED!")
-            logger.info(f"🔥 Callback context state: {callback_context.state}")
-            logger.info(f"🔥 LLM request contents length: {len(llm_request.contents) if llm_request.contents else 0}")
-            if llm_request.contents:
-                for i, content in enumerate(llm_request.contents):
-                    logger.info(f"🔥 Content {i}: role={content.role}, parts={len(content.parts) if content.parts else 0}")
-        
         # Create the expert help agent (based on hw_tutor_agent.py)
         self.expert_help_agent = self._create_expert_help_agent()
         
@@ -220,8 +208,7 @@ class HWBuddyLiveAgent:
             name="homework_tutor",
             model=MODEL,
             instruction=SYSTEM_INSTRUCTION,
-            tools=[self.get_expert_help_tool],
-            before_model_callback=dummy_before_model_callback,
+            tools=[self.get_expert_help_tool]
         )
         
         # Create runner for managing agent interactions
@@ -254,28 +241,59 @@ class HWBuddyLiveAgent:
                         logger.error("No session_id found in tool context state")
                         raise Exception("No session_id found in context")
                     
-                    logger.info(f"Taking picture for session {current_session_id}, user_ask: {user_ask}")
+                    logger.info(f"📸 Taking picture for session {current_session_id}, user_ask: {user_ask}")
+                    
+                    # Check if there's already an upload event for this session
+                    if current_session_id in agent_instance.upload_events:
+                        logger.warning(f"📸 Upload event already exists for session {current_session_id}, cleaning up...")
+                        del agent_instance.upload_events[current_session_id]
                     
                     # Create event and register it for direct notification
                     upload_event = asyncio.Event()
                     agent_instance.upload_events[current_session_id] = upload_event
+                    logger.info(f"📸 Created upload event for session {current_session_id}")
                     
                     # Trigger picture taking via Firestore
                     if agent_instance.db:
                         session_ref = agent_instance.db.collection('sessions').document(current_session_id)
-                        session_ref.update({'command': 'take_picture'})
-                        logger.info(f"Sent take_picture command to session {current_session_id}")
+                        
+                        # First check if the document exists
+                        doc = session_ref.get()
+                        if doc.exists:
+                            logger.info(f"📸 Firestore document exists for session {current_session_id}")
+                            # Update the existing document
+                            session_ref.update({'command': 'take_picture'})
+                            logger.info(f"📸 Updated take_picture command to session {current_session_id}")
+                        else:
+                            logger.warning(f"📸 Firestore document does not exist for session {current_session_id}, creating it")
+                            # Create the document if it doesn't exist
+                            session_ref.set({'command': 'take_picture', 'session_id': current_session_id})
+                            logger.info(f"📸 Created new document with take_picture command for session {current_session_id}")
+                        
+                        # Verify the command was written
+                        verification_doc = session_ref.get()
+                        if verification_doc.exists:
+                            data = verification_doc.to_dict()
+                            logger.info(f"📸 Firestore verification - command: {data.get('command')}")
+                        else:
+                            logger.error(f"📸 Firestore verification failed - document still doesn't exist")
+                    else:
+                        logger.error("📸 Database not available, cannot send take_picture command")
                     
                     # Wait for direct notification from upload endpoint
                     try:
                         await asyncio.wait_for(upload_event.wait(), timeout=30)
-                        logger.info(f"Received upload notification for session {current_session_id}")
+                        logger.info(f"📸 Received upload notification for session {current_session_id}")
                     except asyncio.TimeoutError:
+                        logger.error(f"📸 TIMEOUT waiting for image upload from session {current_session_id}")
+                        logger.error(f"📸 Upload events at timeout: {list(agent_instance.upload_events.keys())}")
+                        logger.error(f"📸 Session images at timeout: {list(agent_instance.session_images.keys())}")
                         raise Exception(f"Timeout waiting for image upload from session {current_session_id}")
                     finally:
                         # Clean up event to prevent memory leaks
                         if current_session_id in agent_instance.upload_events:
                             del agent_instance.upload_events[current_session_id]
+                            logger.info(f"📸 Cleaned up upload event for session {current_session_id}")
                     
                     # Get raw image bytes from session storage
                     if current_session_id not in agent_instance.session_images:
@@ -293,7 +311,9 @@ class HWBuddyLiveAgent:
                     tool_context.state["pending_user_ask"] = user_ask
                     
                     # Clean up session image storage
-                    del agent_instance.session_images[current_session_id]
+                    if current_session_id in agent_instance.session_images:
+                        del agent_instance.session_images[current_session_id]
+                        logger.info(f"📸 Cleaned up session image for {current_session_id}")
                     
                     return "Image captured successfully. I can now see your homework."
                     
@@ -426,7 +446,6 @@ class HWBuddyLiveAgent:
                 
                 # Run the agent using the actual session ID from the created/retrieved session
                 content = UserContent(parts=[Part(text=user_ask)])
-                logger.info(expert_session)
                 async for event in self.expert_help_runner.run_async(
                     session_id=expert_session.id,
                     new_message=content,
@@ -668,12 +687,14 @@ class HWBuddyLiveAgent:
                 'mime_type': mime_type
             }
             
-            logger.info(f"Stored image for session {session_id}: {len(image_data)} bytes, type: {mime_type}")
+            logger.info(f"📸 Stored image for session {session_id}: {len(image_data)} bytes, type: {mime_type}")
             
             # Notify waiting tool if there's an event
             if session_id in self.upload_events:
                 self.upload_events[session_id].set()
-                logger.info(f"Notified take_picture_and_analyze tool that image is ready for session {session_id}")
+                logger.info(f"📸 Notified take_picture_and_analyze tool that image is ready for session {session_id}")
+            else:
+                logger.warning(f"📸 No upload event found for session {session_id} - tool may not be waiting")
             
             return {
                 "success": True,

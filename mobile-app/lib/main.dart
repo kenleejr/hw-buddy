@@ -18,8 +18,8 @@ import 'firebase_options.dart';
 import 'camera_service.dart';
 
 // Backend configuration
-//const String BACKEND_URL = 'https://dca4d5d37cc1.ngrok-free.app';
-const String BACKEND_URL = 'https://69a031530a88.ngrok-free.app';
+//const String BACKEND_URL = 'https://660deffd8b4d.ngrok-free.app';
+const String BACKEND_URL = 'https://660deffd8b4d.ngrok-free.app';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
@@ -218,6 +218,18 @@ class SessionModel extends ChangeNotifier {
         );
         
         print('Backend response: $jsonResponse');
+        
+        // IMPORTANT: Reset both command and status so we can receive new commands
+        if (_sessionId != null) {
+          await FirebaseFirestore.instance
+              .collection('sessions')
+              .doc(_sessionId)
+              .update({
+                'command': 'none',
+                'status': 'ready'
+              });
+          print('📸 Reset command to none and status to ready after successful upload');
+        }
         
         // Status will update to show analysis is complete
         _statusMessage = 'Ready for next question!';

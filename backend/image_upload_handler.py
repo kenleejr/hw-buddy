@@ -45,8 +45,8 @@ class ImageUploadHandler:
             Processing results as a dictionary
         """
         try:
-            logger.info(f"Processing image upload for session {session_id}")
-            logger.info(f"File info: filename={file.filename}, content_type={file.content_type}")
+            logger.info(f"📸 IMAGE UPLOAD: Processing image upload for session {session_id}")
+            logger.info(f"📸 IMAGE UPLOAD: File info: filename={file.filename}, content_type={file.content_type}")
             
             # Validate session exists
             session_status = self.hw_agent.get_session_status(session_id)
