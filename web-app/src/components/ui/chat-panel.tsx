@@ -18,6 +18,7 @@ interface ChatPanelProps {
   lastImageUrl: string | null;
   isAnalyzingImage: boolean;
   currentMathJax: string;
+  processingStatus?: string;
 }
 
 export function ChatPanel({ 
@@ -26,7 +27,8 @@ export function ChatPanel({
   currentAssistantMessage,
   lastImageUrl,
   isAnalyzingImage,
-  currentMathJax
+  currentMathJax,
+  processingStatus
 }: ChatPanelProps) {
   const conversationEndRef = React.useRef<HTMLDivElement>(null);
 
@@ -47,7 +49,9 @@ export function ChatPanel({
         <div className="flex items-center justify-center mb-4">
           <div className="bg-white rounded-lg shadow-lg px-6 py-3 flex items-center gap-3 border border-border">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-hw-primary"></div>
-            <span className="text-hw-primary font-medium">Checking your work...</span>
+            <span className="text-hw-primary font-medium">
+              {processingStatus || "Checking your work..."}
+            </span>
           </div>
         </div>
       )}

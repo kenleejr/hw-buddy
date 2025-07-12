@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import firebase_admin
@@ -6,7 +6,10 @@ from firebase_admin import credentials, firestore
 import os
 import logging
 import traceback
-from typing import Optional
+import json
+import asyncio
+import time
+from typing import Optional, Dict
 from hw_tutor_agent import get_hw_tutor_agent
 
 import base64
@@ -87,6 +90,113 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
+# Global session storage for images - stores raw bytes by session_id
+session_images = {}  # Dictionary to store image bytes by session_id
+
+# Global event storage for direct ADK agent notification
+upload_events = {}  # Dictionary to store asyncio.Event by session_id
+
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time updates"""
+    
+    def __init__(self):
+        # Store active connections by session_id
+        self.active_connections: Dict[str, WebSocket] = {}
+        # Track running tasks to properly cancel them
+        self.active_tasks: Dict[str, asyncio.Task] = {}
+    
+    async def connect(self, websocket: WebSocket, session_id: str):
+        await websocket.accept()
+        self.active_connections[session_id] = websocket
+        logger.info(f"WebSocket connected for session {session_id}")
+    
+    def disconnect(self, session_id: str):
+        if session_id in self.active_connections:
+            del self.active_connections[session_id]
+            logger.info(f"WebSocket disconnected for session {session_id}")
+        
+        # Cancel any running tasks for this session
+        if session_id in self.active_tasks:
+            task = self.active_tasks[session_id]
+            if not task.done():
+                task.cancel()
+                logger.info(f"Cancelled running task for session {session_id}")
+            del self.active_tasks[session_id]
+    
+    def is_connected(self, session_id: str) -> bool:
+        """Check if a session is still connected"""
+        if session_id not in self.active_connections:
+            return False
+        
+        websocket = self.active_connections[session_id]
+        try:
+            # Check if the websocket is still in a valid state
+            return websocket.client_state.name in ["CONNECTED", "CONNECTING"]
+        except:
+            # If we can't check the state, assume disconnected
+            self.disconnect(session_id)
+            return False
+    
+    async def send_status_update(self, session_id: str, status: str, data: dict = None):
+        """Send a status update to the frontend"""
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send status update to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "status_update",
+            "status": status,
+            "data": data or {}
+        }
+        try:
+            await self.active_connections[session_id].send_text(json.dumps(message))
+            logger.info(f"Sent status update to session {session_id}: {status}")
+        except Exception as e:
+            logger.error(f"Error sending status update to session {session_id}: {e}")
+            # Remove disconnected connection
+            self.disconnect(session_id)
+    
+    async def send_event_update(self, session_id: str, event_type: str, event_data: dict):
+        """Send an ADK event update to the frontend"""
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send ADK event to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "adk_event",
+            "event_type": event_type,
+            "data": event_data
+        }
+        try:
+            await self.active_connections[session_id].send_text(json.dumps(message))
+            logger.info(f"Sent ADK event to session {session_id}: {event_type}")
+        except Exception as e:
+            logger.error(f"Error sending ADK event to session {session_id}: {e}")
+            # Remove disconnected connection
+            self.disconnect(session_id)
+    
+    async def send_final_response(self, session_id: str, response_data: dict):
+        """Send the final response to the frontend"""
+        if not self.is_connected(session_id):
+            logger.warning(f"Cannot send final response to disconnected session {session_id}")
+            return
+            
+        message = {
+            "type": "final_response",
+            "data": response_data
+        }
+        try:
+            await self.active_connections[session_id].send_text(json.dumps(message))
+            logger.info(f"Sent final response to session {session_id}")
+        except Exception as e:
+            logger.error(f"Error sending final response to session {session_id}: {e}")
+            # Remove disconnected connection
+            self.disconnect(session_id)
+
+
+# Global connection manager instance
+connection_manager = ConnectionManager()
 
 
 class TakePictureRequest(BaseModel):
@@ -104,6 +214,104 @@ class TakePictureResponse(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "HW Buddy Backend API"}
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    """WebSocket endpoint for real-time communication with frontend"""
+    await connection_manager.connect(websocket, session_id)
+    
+    try:
+        # Send initial connection confirmation
+        await connection_manager.send_status_update(
+            session_id, 
+            "connected", 
+            {"message": "Welcome! Ask me anything about your homework!"}
+        )
+        
+        # Keep connection alive and handle incoming messages
+        while True:
+            try:
+                # Wait for messages from frontend
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                # Handle different message types
+                if message.get("type") == "process_query":
+                    # Cancel any existing task for this session
+                    if session_id in connection_manager.active_tasks:
+                        old_task = connection_manager.active_tasks[session_id]
+                        if not old_task.done():
+                            old_task.cancel()
+                            logger.info(f"Cancelled previous task for session {session_id}")
+                    
+                    # Create and track new task
+                    task = asyncio.create_task(process_query_websocket(session_id, message.get("user_ask", "")))
+                    connection_manager.active_tasks[session_id] = task
+                    
+                elif message.get("type") == "ping":
+                    # Respond to ping to keep connection alive
+                    await connection_manager.send_status_update(session_id, "pong", {})
+                    
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON received from session {session_id}")
+            except Exception as e:
+                logger.error(f"Error processing WebSocket message for session {session_id}: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for session {session_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for session {session_id}: {e}")
+    finally:
+        connection_manager.disconnect(session_id)
+
+
+async def process_query_websocket(session_id: str, user_ask: str):
+    """Process user query and send updates via WebSocket"""
+    try:
+        # Send initial status
+        await connection_manager.send_status_update(
+            session_id, 
+            "processing_started", 
+            {"message": "Starting to process your question..."}
+        )
+        
+        # Get agent and process query
+        agent = get_hw_tutor_agent(db, connection_manager)
+        
+        # Send status update
+        await connection_manager.send_status_update(
+            session_id, 
+            "agent_ready", 
+            {"message": "Listening..."}
+        )
+        
+        # Process the query (this will send events through the connection manager)
+        agent_result = await agent.process_user_query(
+            session_id=session_id,
+            user_query=user_ask
+        )
+        
+        # Send final response
+        response_data = {
+            "success": True,
+            "message": f"Request processed successfully for session {session_id}",
+            "session_id": session_id,
+            "image_url": agent_result.get("image_url"),
+            "image_gcs_url": agent_result.get("image_gcs_url"),
+            "image_description": agent_result.get("response")
+        }
+        
+        await connection_manager.send_final_response(session_id, response_data)
+        
+    except Exception as e:
+        logger.error(f"Error processing query via WebSocket for session {session_id}: {str(e)}")
+        await connection_manager.send_status_update(
+            session_id, 
+            "error", 
+            {"message": f"Error processing request: {str(e)}"}
+        )
 
 @app.post("/take_picture", response_model=TakePictureResponse)
 async def take_picture(request: TakePictureRequest):
@@ -143,6 +351,64 @@ async def take_picture(request: TakePictureRequest):
         logger.error(f"Full traceback: {traceback.format_exc()}")
         error_message = f"Failed to process request: {str(e)}"
         raise HTTPException(status_code=500, detail=error_message)
+
+@app.post("/sessions/{session_id}/upload_image")
+async def upload_image_raw(
+    session_id: str,
+    file: UploadFile = File(...)
+):
+    """
+    Simple image upload that stores raw bytes for ADK agent.
+    No analysis - just storage and Firestore notification.
+    """
+    try:
+        # Validate file type
+        if file.content_type not in ['image/jpeg', 'image/jpg', 'image/png']:
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        
+        # Read raw image bytes
+        image_bytes = await file.read()
+        
+        if len(image_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty file")
+        
+        # Store raw bytes in memory by session_id
+        session_images[session_id] = {
+            'bytes': image_bytes,
+            'mime_type': file.content_type,
+            'timestamp': int(time.time() * 1000)
+        }
+        
+        logger.info(f"Stored image for session {session_id}: {len(image_bytes)} bytes")
+        
+        # Directly notify waiting ADK agent via event
+        if session_id in upload_events:
+            upload_events[session_id].set()
+            logger.info(f"Notified ADK agent that image is ready for session {session_id}")
+        else:
+            logger.info(f"No ADK agent waiting for session {session_id}")
+        
+        # Still update Firestore for mobile app coordination (command status)
+        try:
+            session_doc = db.collection('sessions').document(session_id)
+            session_doc.update({
+                'command': 'done',
+                'last_image_url': f'session:{session_id}',  # Internal reference
+                'timestamp': session_images[session_id]['timestamp']
+            })
+        except Exception as e:
+            logger.warning(f"Could not update Firestore for session {session_id}: {e}")
+        
+        return {
+            "success": True,
+            "message": "Image uploaded successfully",
+            "session_id": session_id,
+            "size": len(image_bytes)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading image for session {session_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():

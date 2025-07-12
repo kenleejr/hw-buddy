@@ -30,7 +30,7 @@ class FirestoreListener:
         Args:
             session_id: Session document ID to watch
             timeout: Maximum wait time in seconds
-            current_image_url: Current image URL to detect changes
+            current_image_url: Current timestamp or URL to detect changes
             
         Returns:
             Dictionary with updated session data
@@ -60,16 +60,16 @@ class FirestoreListener:
                     data = doc.to_dict()
                     
                     # Check if image was updated
-                    new_image_url = data.get('last_image_url')
                     command = data.get('command')
+                    new_timestamp = data.get('timestamp')
                     
                     # Image processing completed when:
                     # 1. Command is 'done' AND
-                    # 2. We have a new image URL AND 
-                    # 3. It's different from current URL (if provided)
+                    # 2. We have a new timestamp AND 
+                    # 3. It's different from current timestamp (if provided)
                     if (command == 'done' and 
-                        new_image_url and 
-                        new_image_url != current_image_url):
+                        new_timestamp and 
+                        new_timestamp != current_image_url):  # current_image_url is actually timestamp now
                         
                         if not future.done():
                             # Schedule the result to be set in the event loop

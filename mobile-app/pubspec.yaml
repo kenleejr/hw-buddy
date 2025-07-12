@@ -18,6 +18,8 @@ dependencies:
   uuid: ^4.4.0
   qr_code_scanner: ^1.0.1
   flutter_image_compress: ^2.3.0
+  http: ^1.2.0  # For direct HTTP uploads
+  web_socket_channel: ^3.0.0  # For WebSocket communication
 
 dev_dependencies:
   flutter_test:
