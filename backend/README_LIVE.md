@@ -586,22 +586,38 @@ This will eliminate the last Firestore dependency and create a fully real-time, 
    - Simplified LLM call chain (max_llm_calls: 3)
    - Single agent reduces latency and complexity
 
+5. **🖼️ IMAGE INJECTION FIX** ✅ **RESOLVED**:
+   - **Root Cause**: ADK session state timing issue where event-based updates weren't immediately accessible
+   - **Solution**: Dual storage approach in both ADK session state AND local `self.sessions` dict
+   - **Result**: Expert agent now correctly sees uploaded images instead of hallucinating
+   - **Files Modified**: 
+     - Enhanced `store_uploaded_image()` with dual storage
+     - Modified context injection to check local storage as fallback
+     - Added comprehensive `log_expert_flow()` debugging function
+
+6. **🎓 Expert Agent Prompt Restored** ✅ **COMPLETED**:
+   - **Removed**: Debug mode prompt that only described images
+   - **Added**: Proper educational tutoring instruction with student-centered approach
+   - **Features**: Step-by-step guidance, adaptive teaching, JSON response format
+   - **Result**: Expert agent now provides proper homework tutoring instead of image debugging
+
 ### 🧪 **TESTING CHECKLIST**:
 
-- [ ] **No Session Conflicts**: Verify no "unknown agent" warnings in logs
-- [ ] **Expert Response Delivery**: Confirm expert responses reach live agent successfully  
-- [ ] **Context Injection**: Expert should have conversation context from live session
-- [ ] **Image Sharing**: Images uploaded to live session should be available to expert
-- [ ] **Rate Limiting**: Expert help requests limited to 3s intervals
-- [ ] **JSON Response Format**: Expert returns proper `{help_text, reasoning}` format
+- [x] **No Session Conflicts**: Verify no "unknown agent" warnings in logs
+- [x] **Expert Response Delivery**: Confirm expert responses reach live agent successfully  
+- [x] **Context Injection**: Expert should have conversation context from live session
+- [x] **Image Sharing**: Images uploaded to live session are available to expert ✅ **FIXED**
+- [x] **Rate Limiting**: Expert help requests limited to 3s intervals
+- [x] **JSON Response Format**: Expert returns proper `{help_text, reasoning}` format
+- [x] **Proper Tutoring**: Expert agent provides educational guidance instead of debug responses
 
 ### 🔍 **DEBUGGING**:
 
 **Key Log Messages to Watch**:
 ```
-🔗 Injecting live session context from session {session_id}
-🔗 Injected context from X live session events  
-📸 Injecting image from live session: X bytes
+🔍 EXPERT_FLOW [CONTEXT_INJECTION] session={session_id} expert_session={expert_session_id}
+🔍 EXPERT_FLOW [IMAGE_INJECTION] data={'image_bytes': X, 'has_local_fallback': True}
+🔍 EXPERT_FLOW [EXPERT_RESPONSE] session={session_id} data={'response_type': 'success'}
 🎓 Created new expert session expert_{session_id}
 🎓 Found final response from ExpertTutorAgent
 ```
@@ -610,11 +626,25 @@ This will eliminate the last Firestore dependency and create a fully real-time, 
 1. Live agent creates session in `hw_buddy_live` app
 2. Expert help creates separate session: `expert_{session_id}` in `hw_buddy_expert` app  
 3. Expert agent automatically gets live session context via callback
-4. No session conflicts or "unknown agent" warnings
-5. Expert responses successfully return to live agent
+4. **Images correctly shared**: Expert sees actual uploaded homework images
+5. No session conflicts or "unknown agent" warnings
+6. Expert responses successfully return to live agent
+7. **Proper tutoring responses**: Educational guidance instead of debug descriptions
 
 ### 📁 **Key Files Modified**:
-- `hw_live_agent.py`: Complete rewrite of agent architecture with separate sessions
+- `hw_live_agent.py`: 
+  - Complete rewrite of agent architecture with separate sessions
+  - **IMAGE FIX**: Dual storage approach for immediate image availability
+  - Enhanced debugging with `log_expert_flow()` function
+  - **PROMPT RESTORED**: Expert agent now provides proper educational tutoring
 - Session services separated (`live_session_service` vs `expert_session_service`)
-- Context injection callback implementation
+- Context injection callback implementation with image sharing fix
 - Simplified expert agent with integrated capabilities
+
+### 🎯 **TECHNICAL ACHIEVEMENTS**:
+
+1. **Solved Image Hallucination Issue**: Expert agent was seeing wrong images due to ADK session state timing
+2. **Implemented Dual Storage Pattern**: Images stored in both ADK events AND local dict for immediate access
+3. **Added Comprehensive Logging**: `log_expert_flow()` tracks every stage of expert agent interaction
+4. **Restored Educational Focus**: Expert agent now provides proper tutoring instead of debug responses
+5. **Maintained Performance**: All fixes implemented without impacting 3s response time goals
