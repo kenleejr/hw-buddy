@@ -46,18 +46,18 @@ OTEL_EXPORTER_OTLP_HEADERS = {
     "project_id": PROJECT_ID,
 }
 
-# Create the OTLP span exporter with endpoint and headers
-exporter = OTLPSpanExporter(
-    endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
-    headers=OTEL_EXPORTER_OTLP_HEADERS,
-)
+# # Create the OTLP span exporter with endpoint and headers
+# exporter = OTLPSpanExporter(
+#     endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
+#     headers=OTEL_EXPORTER_OTLP_HEADERS,
+# )
 
-# Create a tracer provider and add the exporter
-tracer_provider = trace_sdk.TracerProvider()
-tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+# # Create a tracer provider and add the exporter
+# tracer_provider = trace_sdk.TracerProvider()
+# tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
 
-# Set the global tracer provider BEFORE importing/using ADK
-trace.set_tracer_provider(tracer_provider)
+# # Set the global tracer provider BEFORE importing/using ADK
+# trace.set_tracer_provider(tracer_provider)
 
 # Configure logging
 logging.basicConfig(

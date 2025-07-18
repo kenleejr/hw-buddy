@@ -5,11 +5,9 @@ This agent handles real-time audio streaming and image analysis for homework tut
 
 import asyncio
 import logging
-import traceback
 import re
 import json
-from typing import Dict, Any, Optional, AsyncIterator
-from PIL import Image
+from typing import Dict, Any, AsyncIterator
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -18,17 +16,15 @@ from google.adk.agents import Agent, LiveRequestQueue
 from google.adk.runners import Runner
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
-from google.adk.tools.agent_tool import AgentTool
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool, ToolContext
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.genai import types
 from google.genai.types import Part, UserContent, Content
-from google import genai
 
 # Local imports
-from prompts import STATE_ESTABLISHER_AGENT_PROMPT, HINT_AGENT_PROMPT
+from prompts import HINT_AGENT_PROMPT
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -208,15 +204,21 @@ SEND_SAMPLE_RATE = 16000     # Audio input from frontend
 VOICE_NAME = "Aoede"         # Voice for responses
 
 # Model configuration
-MODEL = "gemini-2.0-flash-live-001"
+#MODEL = "gemini-2.0-flash-live-001"
+MODEL="gemini-2.5-flash-preview-native-audio-dialog"
 
 # System instruction for the homework tutor
-SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your sole responsibility is to relay information such as user questions to a backend expert help agent.  \
-              When the agent returns, you relay its response back to the user. \
-              When a user asks you for help you need to call the get_expert_help function. \
-              This calls an agent which will take a picture of their homework and give you guidance on how to help them. \
-              Pass the user's specific question or request as the 'user_ask' parameter to the get_expert_help function. \
-              This function will analyze the student's progress and return with "help_text" which you can relay back to the user."""
+# SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your sole responsibility is to relay information such as user questions to a backend expert help agent.  \
+#               When the agent returns, you relay its response back to the user. \
+#               When a user asks you for help, you need to ALWAYS call the get_expert_help function. \
+#               This calls an agent which WILL TAKE A PICTURE of their homework and give them guidance on how to help them. \
+#               Pass the user's specific question or request as the 'user_ask' parameter to the get_expert_help function. \
+#               This function will analyze the student's progress and return with "help_text" which you can relay back to the user."""
+
+SYSTEM_INSTRUCTION = """You are an AI tutor assistant helping with communication between students and an EXPERT TUTOR AI system.  \
+              Your task is to ALWAYS pass the user questions and requests to the EXPERT AI TUTOR and to relay back to the student all the content and communication sent from the EXPERT AI TUTOR to you.  \
+              ALWAYS Pass the user's specific question or request as the `user_ask` parameter to the `get_expert_help` function. \
+              This function will communicate with the expert ai tutor and return with "help_text" which you can relay back to the user."""
 
 
 class HWBuddyLiveAgent:
@@ -224,25 +226,21 @@ class HWBuddyLiveAgent:
     
     def __init__(self):
         self.sessions: Dict[str, Any] = {}
-        self.session_service = InMemorySessionService()
+        # Separate session services for live and expert agents
+        self.live_session_service = InMemorySessionService()
         self.expert_session_service = InMemorySessionService()
-        
-        # Event coordination for image uploads
-        self.upload_events: Dict[str, asyncio.Event] = {}
-        self.session_images: Dict[str, Dict[str, Any]] = {}
-        
         
         # Initialize Firebase for Firestore communication
         self._init_firebase()
         
-        # Create the expert help agent (based on hw_tutor_agent.py)
+        # Create the expert help agent (simplified without sequential agent)
         self.expert_help_agent = self._create_expert_help_agent()
         
-        # Create the expert help runner (independent from main live agent)
+        # Create the expert help runner using separate session service
         self.expert_help_runner = Runner(
-            app_name="expert_help",
+            app_name="hw_buddy_expert",  # Different app name for expert
             agent=self.expert_help_agent,
-            session_service=self.expert_session_service,
+            session_service=self.expert_session_service,  # Separate session service
         )
         
         # Create the get_expert_help function tool
@@ -262,129 +260,145 @@ class HWBuddyLiveAgent:
         self.runner = Runner(
             app_name="hw_buddy_live",
             agent=self.agent,
-            session_service=self.session_service,
+            session_service=self.live_session_service,
         )
         
         logger.info("HW Buddy Live Agent initialized")
     
-    def _create_expert_help_agent(self) -> SequentialAgent:
-        """Create the expert help agent based on hw_tutor_agent.py logic."""
-        from prompts import STATE_ESTABLISHER_AGENT_PROMPT, HINT_AGENT_PROMPT
+    def _create_expert_help_agent(self) -> LlmAgent:
+        """Create a single, simple expert agent that can take pictures and provide help directly."""
         
-        # Create the take_picture tool function
-        def create_take_picture_function(agent_instance):
-            async def take_picture_and_analyze_tool(tool_context: ToolContext, user_ask: str) -> str:
+        # Create the take_picture tool
+        def create_take_picture_tool():
+            async def take_picture_tool(tool_context: ToolContext) -> str:
                 """
-                Tool that triggers image capture and retrieves raw image bytes.
-                The image bytes are stored in context for injection into the next LLM request.
+                Simple tool to capture an image of the student's work.
                 """
                 try:
-                    # Get current session ID from the live agent
-                    current_session_id = getattr(agent_instance, 'current_session_id', None)
-                    if not current_session_id and agent_instance.sessions:
-                        current_session_id = list(agent_instance.sessions.keys())[0]
+                    # Get current session ID
+                    current_session_id = getattr(self, 'current_session_id', None)
+                    if not current_session_id and self.sessions:
+                        current_session_id = list(self.sessions.keys())[0]
                     
                     if not current_session_id:
-                        logger.error("No session_id found in tool context state")
-                        raise Exception("No session_id found in context")
+                        logger.error("No session_id found for picture capture")
+                        return "Error: Could not identify the current session."
                     
-                    logger.info(f"📸 Taking picture for session {current_session_id}, user_ask: {user_ask}")
-                    
-                    # Check if there's already an upload event for this session
-                    if current_session_id in agent_instance.upload_events:
-                        logger.warning(f"📸 Upload event already exists for session {current_session_id}, cleaning up...")
-                        del agent_instance.upload_events[current_session_id]
-                    
-                    # Create event and register it for direct notification
-                    upload_event = asyncio.Event()
-                    agent_instance.upload_events[current_session_id] = upload_event
-                    logger.info(f"📸 Created upload event for session {current_session_id}")
+                    logger.info(f"📸 Expert agent requesting picture for session {current_session_id}")
                     
                     # Trigger picture taking via Firestore
-                    if agent_instance.db:
-                        session_ref = agent_instance.db.collection('sessions').document(current_session_id)
-                        
-                        # First check if the document exists
+                    if self.db:
+                        session_ref = self.db.collection('sessions').document(current_session_id)
                         doc = session_ref.get()
                         if doc.exists:
-                            logger.info(f"📸 Firestore document exists for session {current_session_id}")
-                            # Update the existing document
                             session_ref.update({'command': 'take_picture'})
-                            logger.info(f"📸 Updated take_picture command to session {current_session_id}")
                         else:
-                            logger.warning(f"📸 Firestore document does not exist for session {current_session_id}, creating it")
-                            # Create the document if it doesn't exist
                             session_ref.set({'command': 'take_picture', 'session_id': current_session_id})
-                            logger.info(f"📸 Created new document with take_picture command for session {current_session_id}")
+                        logger.info(f"📸 Sent take_picture command for session {current_session_id}")
                         
-                        # Verify the command was written
-                        verification_doc = session_ref.get()
-                        if verification_doc.exists:
-                            data = verification_doc.to_dict()
-                            logger.info(f"📸 Firestore verification - command: {data.get('command')}")
-                        else:
-                            logger.error(f"📸 Firestore verification failed - document still doesn't exist")
+                        # Wait for the image to be captured
+                        await asyncio.sleep(4)  # Give time for image capture
+                        
+                        # The image should now be available in session state
+                        # The inject_image_callback will handle injecting it into the next LLM call
+                        logger.info("📸 Image capture completed, will be available for analysis")
+                        return "Image captured successfully. I can now see the student's work."
                     else:
                         logger.error("📸 Database not available, cannot send take_picture command")
-                    
-                    # Wait for direct notification from upload endpoint
-                    try:
-                        await asyncio.wait_for(upload_event.wait(), timeout=30)
-                        logger.info(f"📸 Received upload notification for session {current_session_id}")
-                    except asyncio.TimeoutError:
-                        logger.error(f"📸 TIMEOUT waiting for image upload from session {current_session_id}")
-                        logger.error(f"📸 Upload events at timeout: {list(agent_instance.upload_events.keys())}")
-                        logger.error(f"📸 Session images at timeout: {list(agent_instance.session_images.keys())}")
-                        raise Exception(f"Timeout waiting for image upload from session {current_session_id}")
-                    finally:
-                        # Clean up event to prevent memory leaks
-                        if current_session_id in agent_instance.upload_events:
-                            del agent_instance.upload_events[current_session_id]
-                            logger.info(f"📸 Cleaned up upload event for session {current_session_id}")
-                    
-                    # Get raw image bytes from session storage
-                    if current_session_id not in agent_instance.session_images:
-                        raise Exception(f"No image data found for session {current_session_id}")
-                    
-                    image_data = agent_instance.session_images[current_session_id]
-                    image_bytes = image_data['bytes']
-                    mime_type = image_data['mime_type']
-                    
-                    logger.info(f"Retrieved image data: {len(image_bytes)} bytes, type: {mime_type}")
-                    
-                    # Store image bytes in context for injection callback
-                    tool_context.state["pending_image_bytes"] = image_bytes
-                    tool_context.state["pending_image_mime_type"] = mime_type
-                    tool_context.state["pending_user_ask"] = user_ask
-                    
-                    # Clean up session image storage
-                    if current_session_id in agent_instance.session_images:
-                        del agent_instance.session_images[current_session_id]
-                        logger.info(f"📸 Cleaned up session image for {current_session_id}")
-                    
-                    return "Image captured successfully. I can now see your homework."
+                        return "Error: Picture capture service not available."
                     
                 except Exception as e:
-                    logger.error(f"Error in take_picture_and_analyze_tool: {str(e)}")
+                    logger.error(f"Error in take_picture_tool: {str(e)}")
                     return f"Error capturing image: {str(e)}"
             
-            return take_picture_and_analyze_tool
+            return take_picture_tool
         
-        # Create the injection callback
-        def inject_image_callback(callback_context: CallbackContext, llm_request: LlmRequest):
+        # Create the take picture function tool
+        take_picture_function_tool = FunctionTool(
+            func=create_take_picture_tool()
+        )
+        
+        # Create a before model callback to inject context from live session and images
+        def inject_live_context_and_image(callback_context: CallbackContext, llm_request: LlmRequest):
             """
-            Before model callback that injects pending image bytes into the LLM request.
+            Before model callback that injects latest events from live session and images.
             """
-            pending_image_bytes = callback_context.state.get("pending_image_bytes")
-            pending_mime_type = callback_context.state.get("pending_image_mime_type", "image/jpeg")
+            # Get current session ID from expert context
+            current_session_id = getattr(self, 'current_session_id', None)
             
-            if pending_image_bytes:
-                logger.info(f"Injecting image bytes into LLM request: {len(pending_image_bytes)} bytes, type: {pending_mime_type}")
+            if current_session_id:
+                logger.info(f"🔗 Injecting live session context from session {current_session_id}")
+                
+                try:
+                    # Get the live session to access its latest events
+                    live_session = self.live_session_service.get_session(
+                        app_name="hw_buddy_live",
+                        user_id=f"student_{current_session_id}",
+                        session_id=current_session_id
+                    )
+                    
+                    if live_session and hasattr(live_session, 'events') and live_session.events:
+                        # Get the last few relevant events from live session
+                        recent_events = live_session.events[-5:]  # Last 5 events
+                        
+                        # Build context from recent events
+                        context_parts = []
+                        for event in recent_events:
+                            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                                for part in event.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        context_parts.append(f"[{event.author}]: {part.text}")
+                        
+                        if context_parts:
+                            context_text = "Recent conversation context:\n" + "\n".join(context_parts[-3:])  # Last 3 relevant messages
+                            
+                            # Inject the context at the beginning of the request
+                            if not llm_request.contents:
+                                llm_request.contents = []
+                            
+                            context_content = Content(role="user", parts=[Part(text=context_text)])
+                            llm_request.contents.insert(0, context_content)
+                            
+                            logger.info(f"🔗 Injected context from {len(context_parts)} live session events")
+                    
+                    # Also check for images in the live session state
+                    if live_session and hasattr(live_session, 'state'):
+                        current_image_bytes = live_session.state.get("temp:current_image_bytes")
+                        current_image_mime_type = live_session.state.get("temp:current_image_mime_type", "image/jpeg")
+                        
+                        if current_image_bytes:
+                            logger.info(f"📸 Injecting image from live session: {len(current_image_bytes)} bytes")
+                            
+                            # Create image part from raw bytes
+                            image_part = Part.from_bytes(
+                                data=current_image_bytes,
+                                mime_type=current_image_mime_type
+                            )
+                            
+                            # Add the image content to the LLM request
+                            if not llm_request.contents:
+                                llm_request.contents = []
+                            
+                            # Insert the image content as a user message
+                            image_content = Content(role="user", parts=[image_part])
+                            llm_request.contents.append(image_content)
+                            
+                            logger.info("📸 Image successfully injected into LLM request from live session")
+                
+                except Exception as e:
+                    logger.error(f"Error injecting live session context: {e}")
+                    
+            # Also check for images in the expert session state (fallback)
+            current_image_bytes = callback_context.state.get("temp:current_image_bytes")
+            current_image_mime_type = callback_context.state.get("temp:current_image_mime_type", "image/jpeg")
+            
+            if current_image_bytes:
+                logger.info(f"📸 Injecting image from expert session: {len(current_image_bytes)} bytes")
                 
                 # Create image part from raw bytes
                 image_part = Part.from_bytes(
-                    data=pending_image_bytes,
-                    mime_type=pending_mime_type
+                    data=current_image_bytes,
+                    mime_type=current_image_mime_type
                 )
                 
                 # Add the image content to the LLM request
@@ -395,163 +409,71 @@ class HWBuddyLiveAgent:
                 image_content = Content(role="user", parts=[image_part])
                 llm_request.contents.append(image_content)
                 
-                # Clear the pending image from state to avoid reinjection
-                callback_context.state["pending_image_bytes"] = None
-                callback_context.state["pending_image_mime_type"] = None
-                
-                logger.info("Image bytes successfully injected into LLM request")
+                logger.info("📸 Image successfully injected into LLM request from expert session")
         
-        # Create the take picture tool
-        take_picture_tool = FunctionTool(
-            func=create_take_picture_function(self)
-        )
-        
-        # Create before tool callback for rate limiting take_picture calls
-        def before_tool_callback_rate_limiter(tool, args, tool_context):
-            """Rate limit take_picture_and_analyze_tool calls to prevent rapid-fire requests."""
-            import time
-            
-            # Only apply rate limiting to the take_picture tool
-            if tool.name != 'take_picture_and_analyze_tool':
-                return None
-            
-            current_time = time.time()
-            last_tool_call_time = tool_context.state.get("last_take_picture_call_time", 0)
-            time_since_last_call = current_time - last_tool_call_time
-            
-            # Rate limiting: Only allow one take_picture call every 10 seconds
-            if time_since_last_call < 5.0 and last_tool_call_time > 0:
-                logger.info(f"⚠️ Tool rate limiting: take_picture called {time_since_last_call:.1f}s ago, rejecting duplicate request")
-                # Return a dictionary to skip the tool execution and provide a canned response
-                return {"result": "Please wait a moment - still processing your previous image request..."}
-            
-            # Update the last call time and allow the tool to proceed
-            tool_context.state["last_take_picture_call_time"] = current_time
-            logger.info(f"✅ Take picture tool call allowed, updating last call time to {current_time}")
-            
-            return None  # Allow the tool to proceed normally
-        
-        # Create the hint agent (will be used as a tool)
-        hint_agent = LlmAgent(
-            name="HintAgent",
-            model="gemini-2.5-flash",
-            instruction=HINT_AGENT_PROMPT
-        )
-        
-        # Create the visualizer agent (will be used as a tool)
-        visualizer_agent = LlmAgent(
-            name="VisualizerAgent",
-            model="gemini-2.5-flash",
-            instruction="""You are a visualization expert for math problems. Your job is to create interactive Chart.js visualizations to help students understand mathematical concepts.
+        # Create a single smart expert agent
+        expert_agent = LlmAgent(
+            name="ExpertTutorAgent", 
+            model="gemini-2.5-flash",  # Using flash for speed and reliability
+            tools=[take_picture_function_tool],
+            before_model_callback=inject_live_context_and_image,
+            instruction="""You are an intelligent homework tutor. You help students by analyzing their work and providing guidance.
 
-Given a problem description, generate JavaScript code that creates a Chart.js visualization. Focus on:
-- Systems of equations: Plot lines on a coordinate plane
-- Quadratic functions: Show parabolas with key features
-- Linear functions: Show lines with slope and intercepts
-- Data analysis: Create appropriate charts for datasets
+AVAILABLE TOOLS:
+- "take_picture_tool" - Capture an image of the student's work/problem
 
-Return ONLY a JSON object with this structure:
+DECISION PROCESS:
+1. **Assess if you need to see their work**: 
+   - If student asks "Can you help me with this problem?", "What's wrong with my work?", "I'm stuck", etc. → Use take_picture_tool first
+   - If student asks general questions like "What is calculus?" → No picture needed
+
+2. **Provide appropriate help**:
+   - For step-by-step guidance: Provide clear, sequential hints
+   - For visual problems: Create simple text-based explanations or suggest visualization approaches
+   - For complex math: Use proper mathematical notation
+
+RESPONSE FORMAT:
+Always return a JSON response with this structure:
 {
-  "visualization_type": "linear_system|quadratic|linear|data_chart",
-  "chart_config": {
-    // Complete Chart.js configuration object
-  },
-  "explanation": "Brief explanation of what the visualization shows and how it helps"
+  "help_text": "Your helpful response to the student",
+  "reasoning": "Brief explanation of your approach"
 }
 
-The chart_config should be a complete Chart.js configuration that can be passed directly to new Chart().
-Use meaningful colors, labels, and formatting. Include gridlines and axis labels."""
-        )
-        
-        # Create the help triage agent that decides between hint and visualization
-        help_triage_agent = LlmAgent(
-            name="HelpTriageAgent", 
-            model="gemini-2.5-flash",
-            sub_agents=[hint_agent, visualizer_agent],
-            instruction="""You are a tutoring coordinator that decides the best way to help a student based on their question and the problem they're working on.
+GUIDELINES:
+- Be encouraging and supportive
+- Give hints rather than complete solutions
+- Explain concepts clearly
+- If you see their work in an image, be specific about what they did right and wrong
+- Use mathematical notation when appropriate
+- Keep responses concise but thorough
 
-You have access to two tools:
-1. "HintAgent" - Provides step-by-step hints and guidance
-2. "VisualizerAgent" - Creates interactive visualizations (charts, graphs)
-
-Given the user's question: {pending_user_ask} and the problem description: {problem_at_hand}, decide which approach would be most helpful:
-
-Use HintAgent when:
-- Student needs single next step hint
-- Problem involves algebraic manipulation
-- Student is stuck on a specific step
-- Conceptual explanation is needed
-
-Use VisualizerAgent when:
-- Problem involves systems of equations (2+ variables)
-- Graphing or plotting would help understanding
-- Student would benefit from seeing the visual representation
-- Problem involves functions, lines, parabolas, or data
-
-Always call exactly ONE tool based on your analysis. Pass the full context including both the user's question and the problem description to the chosen tool."""
-        )
-        
-        # Create the state establisher agent
-        state_establisher_agent = LlmAgent(
-            name="StateEstablisher",
-            model="gemini-2.5-flash",
-            tools=[take_picture_tool],
-            before_model_callback=inject_image_callback,
-            before_tool_callback=before_tool_callback_rate_limiter,
-            output_key="problem_at_hand",
-            instruction=STATE_ESTABLISHER_AGENT_PROMPT
-        )
-        
-        # Create before agent callback with rate limiting
-        async def before_agent_callback1(callback_context: CallbackContext) -> Optional[Content]:
-            import time
-            
-            current_time = time.time()
-            last_call_time = callback_context.state.get("last_expert_call_time", 0)
-            time_since_last_call = current_time - last_call_time
-            
-            # Rate limiting: Only allow one call every 15 seconds
-            if time_since_last_call < 5.0 and last_call_time > 0:
-                logger.info(f"⚠️ Rate limiting: Expert help called {time_since_last_call:.1f}s ago, rejecting duplicate request")
-                # Return content to skip the agent and respond with rate limit message
-                return Content(
-                    parts=[Part(text="Still processing your previous request. Please wait a moment...")],
-                    role="model"
-                )
-            
-            # Update the last call time
-            callback_context.state["last_expert_call_time"] = current_time
-            logger.info(f"✅ Expert help request allowed, updating last call time to {current_time}")
-            
-            # Original logic for user interaction tracking
-            user_interaction_count = callback_context.state.get("user_interaction_count", 0)
-            if user_interaction_count == 0:
-                callback_context.state["problem_at_hand"] = "None"
-            elif callback_context.state.get("problem_at_hand", None):
-                callback_context.state["problem_at_hand"] = "None"
-            callback_context.state["user_interaction_count"] = user_interaction_count + 1
-            
-            return None
-        
-        # Create the sequential agent with new architecture
-        expert_agent = SequentialAgent(
-            name="expert_help_agent",
-            before_agent_callback=[before_agent_callback1],
-            sub_agents=[state_establisher_agent, help_triage_agent]
+Remember: Your goal is to help students learn, not to do their homework for them."""
         )
         
         return expert_agent
     
     def _create_get_expert_help_function(self):
-        """Create the get_expert_help function that uses the independent runner."""
+        """Create a simple get_expert_help function using direct agent interaction."""
         async def get_expert_help(tool_context: ToolContext, user_ask: str) -> str:
             """
-            Get expert help by running the independent expert help agent.
-            This function creates its own session and event loop, emitting events that
-            will be forwarded to the frontend for processing status updates.
+            Get expert help using direct agent interaction - much simpler and faster.
             """
             try:
-                # Get current session ID for event forwarding
+                import time
+                
+                # Rate limiting check
+                current_time = time.time()
+                last_call_time = tool_context.state.get("last_expert_help_time", 0)
+                time_since_last_call = current_time - last_call_time
+                
+                if time_since_last_call < 3.0 and last_call_time > 0:
+                    logger.info(f"⚠️ Rate limiting: Expert help called {time_since_last_call:.1f}s ago")
+                    return "Still processing your previous request. Please wait a moment..."
+                
+                # Update the last call time
+                tool_context.state["last_expert_help_time"] = current_time
+                
+                # Get current session ID
                 current_session_id = getattr(self, 'current_session_id', None)
                 if not current_session_id and self.sessions:
                     current_session_id = list(self.sessions.keys())[0]
@@ -560,91 +482,75 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                     logger.error("No session_id found for expert help")
                     return "I apologize, but I couldn't access the session to help you."
                 
-                # Get the session data including expert session
-                session_data = self.sessions.get(current_session_id)
-                if not session_data:
-                    logger.error(f"Session data not found for {current_session_id}")
-                    return "I apologize, but I couldn't access the session data."
+                logger.info(f"🎓 Starting expert help for session {current_session_id}, user_ask: {user_ask}")
                 
-                expert_session = session_data.get("expert_session")
-                if not expert_session:
-                    logger.error(f"Expert session not found for {current_session_id}")
-                    return "I apologize, but I couldn't access the expert session."
+                # Create separate expert session with unique ID
+                expert_session_id = f"expert_{current_session_id}"
+                live_user_id = self.sessions[current_session_id]["adk_session"].user_id
                 
-                logger.info(f"Starting expert help for session {current_session_id}, user_ask: {user_ask}")
+                # Create or get expert session
+                try:
+                    expert_session = await self.expert_session_service.get_session(
+                        app_name="hw_buddy_expert",
+                        user_id=live_user_id,
+                        session_id=expert_session_id
+                    )
+                    if not expert_session:
+                        expert_session = await self.expert_session_service.create_session(
+                            app_name="hw_buddy_expert",
+                            user_id=live_user_id,
+                            session_id=expert_session_id
+                        )
+                        logger.info(f"🎓 Created new expert session {expert_session_id}")
+                    else:
+                        logger.info(f"🎓 Using existing expert session {expert_session_id}")
+                except Exception as e:
+                    logger.error(f"Error creating/getting expert session: {e}")
+                    return "I apologize, but I couldn't create an expert session to help you."
                 
-                # Set up event forwarding callback
-                async def forward_events(session_id, event):
-                    """Forward expert help events to the main session."""
-                    from audio_websocket_server import get_audio_websocket_manager
-                    websocket_manager = get_audio_websocket_manager()
-                    if websocket_manager:
-                        # Forward the event to the main session
-                        await websocket_manager._send_adk_event_update(current_session_id, event)
-                
-                # Run the expert help agent with event forwarding
-                final_response = ""
-                final_response_data = None
-                # Create run config
+                # Use separate expert session
                 run_config = RunConfig(
                     streaming_mode=StreamingMode.NONE,
-                    max_llm_calls=10
+                    max_llm_calls=3  # Keep it simple and fast
                 )
                 
-                # Run the agent using the actual session ID from the created/retrieved session
+                # Create user content with the question
                 content = UserContent(parts=[Part(text=user_ask)])
+                
+                # Run the expert agent using separate session
+                final_response = ""
                 async for event in self.expert_help_runner.run_async(
-                    session_id=expert_session.id,
+                    session_id=expert_session_id,  # Separate expert session
                     new_message=content,
                     run_config=run_config,
-                    user_id="student"
+                    user_id=live_user_id
                 ):
-                    # Forward events to the main session for frontend updates
-                    await forward_events(current_session_id, event)
-                    logger.info(f"Event from agent {event.author}")
-                    
-                    # Check if this is a final response but don't return yet - collect it
-                    # Look for final responses from any of the expert agents
-                    if event.is_final_response() and not final_response_data and event.author in ["root_agent", "expert_help_agent", "VisualizerAgent", "HintAgent"]:
-                        logger.info(f"Found final response event from {event.author}!")
-                        # Extract text content
+                    # Check for final response
+                    if event.is_final_response() and event.author == "ExpertTutorAgent":
+                        logger.info(f"🎓 Found final response from ExpertTutorAgent")
                         if event.content:
                             for part in event.content.parts:
-                                logger.info(f"Checking part: {part}")
                                 if hasattr(part, 'text') and part.text:
-                                    logger.info(f"🔍 Expert help agent final output: {part.text}")
+                                    raw_response = part.text
                                     
-                                    # Store the response text (cleaning now happens in event forwarding)
-                                    final_response_data = {
-                                        "response": part.text
-                                    }
+                                    # Clean the response
+                                    cleaned_response = clean_agent_response(raw_response)
+                                    
+                                    # Try to parse as JSON and extract help_text
+                                    try:
+                                        parsed_response = json.loads(cleaned_response)
+                                        if isinstance(parsed_response, dict) and "help_text" in parsed_response:
+                                            final_response = parsed_response["help_text"]
+                                        else:
+                                            final_response = cleaned_response
+                                    except json.JSONDecodeError:
+                                        # If not JSON, use the response directly
+                                        final_response = cleaned_response
+                                    
                                     break
                 
-                # Return the final response if we found one
-                if final_response_data:
-                    raw_response = final_response_data["response"]
-                    
-                    # Clean the response and extract help_text for the live agent to recite
-                    cleaned_response = clean_agent_response(raw_response)
-                    logger.info(f"🔍 Cleaned expert help response: {cleaned_response}")
-                    
-                    # Try to parse as JSON and extract help_text
-                    try:
-                        parsed_response = json.loads(cleaned_response)
-                        if isinstance(parsed_response, dict) and "help_text" in parsed_response:
-                            final_response = parsed_response["help_text"]
-                            logger.info(f"🔍 Extracted help_text for live agent: {final_response}")
-                        else:
-                            # Fallback to cleaned response if no help_text found
-                            final_response = cleaned_response
-                            logger.info("🔍 No help_text found, using cleaned response")
-                    except json.JSONDecodeError:
-                        # Fallback to cleaned response if not valid JSON
-                        final_response = cleaned_response
-                        logger.info("🔍 Response not valid JSON, using cleaned response")
-                
-                logger.info(f"Expert help completed for session {current_session_id}")
-                return final_response or "I've analyzed your homework and provided guidance above."
+                logger.info(f"🎓 Expert help completed for session {current_session_id}")
+                return final_response or "I've analyzed your request and provided guidance above."
                 
             except Exception as e:
                 logger.error(f"Error in get_expert_help: {str(e)}")
@@ -732,7 +638,7 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
         
         # Create ADK session - this method is actually async!
         try:
-            adk_session = await self.session_service.create_session(
+            adk_session = await self.live_session_service.create_session(
                 app_name="hw_buddy_live",
                 user_id=f"student_{session_id}",
                 session_id=session_id,
@@ -760,22 +666,12 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
             input_audio_transcription=types.AudioTranscriptionConfig(),
         )
         
-        # Create expert session for this live session
-        expert_session = await self.expert_session_service.create_session(
-            app_name="expert_help",
-            user_id="student",
-            session_id=f"expert_{session_id}",
-        )
-        
-        # Store session data
+        # Store session data (no separate expert session needed)
         session_data = {
             "session_id": session_id,
             "adk_session": adk_session,
-            "expert_session": expert_session,
             "live_request_queue": live_request_queue,
             "run_config": run_config,
-            "current_image": None,
-            "problem_state": None,
             "is_active": False,
         }
         
@@ -819,7 +715,7 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
     
     async def store_uploaded_image(self, session_id: str, image_data: bytes, mime_type: str) -> Dict[str, Any]:
         """
-        Store an uploaded image and notify waiting tools.
+        Store an uploaded image directly in the shared session state.
         This is called by the image upload handler when an image is received.
         
         Args:
@@ -831,24 +727,43 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
             Storage confirmation
         """
         try:
-            # Store image data
-            self.session_images[session_id] = {
-                'bytes': image_data,
-                'mime_type': mime_type
+            # Get the session to access its state
+            session = await self.live_session_service.get_session(
+                app_name="hw_buddy_live",
+                user_id=self.sessions[session_id]["adk_session"].user_id,
+                session_id=session_id
+            )
+            
+            if not session:
+                raise ValueError(f"Session {session_id} not found")
+            
+            # Store image data directly in session state
+            # We need to create an event to update the state
+            from google.adk.events import Event, EventActions
+            import time
+            
+            state_updates = {
+                "temp:current_image_bytes": image_data,
+                "temp:current_image_mime_type": mime_type,
+                "temp:image_upload_time": time.time()
             }
             
-            logger.info(f"📸 Stored image for session {session_id}: {len(image_data)} bytes, type: {mime_type}")
+            # Create an event with state updates
+            update_event = Event(
+                invocation_id=f"image_upload_{session_id}",
+                author="system",
+                actions=EventActions(state_delta=state_updates),
+                timestamp=time.time()
+            )
             
-            # Notify waiting tool if there's an event
-            if session_id in self.upload_events:
-                self.upload_events[session_id].set()
-                logger.info(f"📸 Notified take_picture_and_analyze tool that image is ready for session {session_id}")
-            else:
-                logger.warning(f"📸 No upload event found for session {session_id} - tool may not be waiting")
+            # Append the event to update state
+            await self.live_session_service.append_event(session, update_event)
+            
+            logger.info(f"📸 Stored image in session state for {session_id}: {len(image_data)} bytes, type: {mime_type}")
             
             return {
                 "success": True,
-                "message": "Image stored successfully",
+                "message": "Image stored successfully in session state",
                 "session_id": session_id
             }
             
@@ -876,8 +791,6 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
         return {
             "exists": True,
             "is_active": session_data["is_active"],
-            "has_image": session_data["current_image"] is not None,
-            "has_problem_state": session_data["problem_state"] is not None,
         }
 
 

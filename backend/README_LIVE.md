@@ -2,17 +2,24 @@
 
 This is the updated backend implementation using Google's ADK (Agent Development Kit) for intelligent homework tutoring with real-time audio streaming and optimized image processing.
 
-## 🎯 Current Architecture
+## 🎯 Current Architecture (Latest Update)
 
 ### Key Features:
-- **Sequential Agent Architecture**: Multi-agent system with intelligent routing between HintAgent and VisualizerAgent
+- **✅ SIMPLIFIED ARCHITECTURE**: Single ExpertTutorAgent with separate session isolation
+- **✅ SEPARATE SESSIONS**: Live and Expert agents run in completely separate sessions to eliminate conflicts
+- **✅ CONTEXT INJECTION**: Callback system automatically injects live session context into expert agent
 - **Real-time Audio Streaming**: Direct WebSocket audio communication via ADK Live API
 - **Event-based Image Processing**: Immediate image processing with `Part.from_bytes()` injection
 - **Direct Mobile Upload**: Mobile app uploads images directly to backend for <50ms processing
 - **WebSocket Real-time Updates**: Live status updates to frontend during image processing
-- **Interactive Visualizations**: Chart.js integration for mathematical visualizations
 - **Session Management**: Robust session handling with duplicate connection prevention
 - **Rate Limiting**: Prevents rapid-fire requests with intelligent callback filtering
+
+### ⚠️ BREAKING CHANGES (Latest):
+- **Removed Sequential Agent**: Eliminated complex SequentialAgent, StateEstablisher, HelpTriageAgent architecture
+- **Single Expert Agent**: Now uses one `ExpertTutorAgent` with `take_picture_tool` and intelligent decision-making
+- **Separate Session Services**: Live and Expert agents use completely separate `InMemorySessionService` instances
+- **Context Bridge**: `before_model_callback` injects live session events as context into expert agent calls
 
 ### Components:
 
@@ -23,13 +30,14 @@ This is the updated backend implementation using Google's ADK (Agent Development
 - Direct HTTP image upload endpoint: `POST /sessions/{session_id}/upload_image`
 - Audio WebSocket management via `audio_websocket_server.py`
 
-#### 2. `hw_live_agent.py` - Sequential Agent System
-- **Sequential Agent**: `StateEstablisherAgent` → `HelpTriageAgent` → `[HintAgent | VisualizerAgent]`
-- **Take Picture Tool**: `take_picture_and_analyze_tool()` triggers mobile image capture
+#### 2. `hw_live_agent.py` - Simplified Agent System ✅ UPDATED
+- **✅ Single Expert Agent**: `ExpertTutorAgent` with integrated decision-making (replaces complex sequential system)
+- **✅ Separate Sessions**: Live agent (`hw_buddy_live` app) and Expert agent (`hw_buddy_expert` app) run in isolation
+- **✅ Context Injection**: `inject_live_context_and_image()` callback automatically injects live session context
+- **Take Picture Tool**: `take_picture_tool()` triggers mobile image capture and stores in expert session
 - **Event-based Waiting**: Uses `asyncio.Event` for 10-20x faster response than Firestore
 - **Image Injection**: Uses `Part.from_bytes()` to inject raw image data directly into LLM context
-- **Intelligent Routing**: HelpTriageAgent decides between hints and visualizations based on problem type
-- **Rate Limiting**: Prevents rapid-fire requests with 15s expert help and 5s tool call limits
+- **Rate Limiting**: Prevents rapid-fire requests with 3s expert help rate limiting
 
 #### 3. `audio_websocket_server.py` - Real-time Communication
 - WebSocket manager for bidirectional audio streaming
@@ -37,12 +45,14 @@ This is the updated backend implementation using Google's ADK (Agent Development
 - Real-time status updates during image processing
 - Session management and connection lifecycle
 
-#### 4. Agent Architecture Details
-- **StateEstablisherAgent**: Takes pictures and establishes problem context
-- **HelpTriageAgent**: Routes between hint and visualization based on problem analysis
-- **HintAgent**: Provides step-by-step guidance and mathematical explanations
-- **VisualizerAgent**: Creates Chart.js configurations for interactive visualizations
-- **JSON Cleaning**: Separate cleaning functions for MathJax vs. visualization responses
+#### 4. Agent Architecture Details ✅ SIMPLIFIED
+- **✅ ExpertTutorAgent**: Single intelligent agent with integrated decision-making capabilities
+  - Automatically determines if picture is needed based on user request
+  - Provides both step-by-step guidance AND visualizations as needed
+  - Uses JSON output format with `help_text` and `reasoning` fields
+  - Model: `gemini-2.5-flash` for speed and reliability
+- **Live Agent**: Simple relay agent that passes requests to expert and returns responses
+- **Context Injection**: Live session events automatically injected into expert agent context
 
 #### 5. Mobile App Integration
 - **Direct Upload**: Raw image bytes uploaded via HTTP POST
@@ -129,116 +139,118 @@ POST /take_picture  # For backward compatibility
 GET /health         # Health check
 ```
 
-## 🎯 Sequential Agent Flow (Current)
+## 🎯 Simplified Agent Flow (Current) ✅ UPDATED
 
-### Multi-Agent Architecture with Intelligent Routing:
+### Single Expert Agent with Separate Sessions:
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Web as Web App
-    participant Live as Live Agent
-    participant State as StateEstablisher
-    participant Triage as HelpTriageAgent
-    participant Hint as HintAgent
-    participant Viz as VisualizerAgent
+    participant Live as Live Agent (hw_buddy_live)
+    participant Expert as Expert Agent (hw_buddy_expert)
+    participant Context as Context Injection
     participant Mobile as Mobile App
     participant Backend as Backend API
 
     User->>Web: "Help me with this problem"
     Web->>Live: User query via WebSocket
-    Live->>State: get_expert_help(user_ask)
+    Live->>Expert: get_expert_help(user_ask) [separate session]
     
-    Note over State: Rate limiting: 15s between calls
-    State->>State: Create asyncio.Event()
-    State->>Mobile: Firestore: {'command': 'take_picture'}
-    Mobile->>Backend: HTTP POST raw image bytes
-    Backend->>State: upload_events[session_id].set() ⚡
-    State->>State: Part.from_bytes(image_data) injection
-    State->>Triage: problem_at_hand context
+    Note over Expert: Rate limiting: 3s between calls
+    Note over Context: inject_live_context_and_image() callback
+    Context->>Live: Fetch recent events from live session
+    Context->>Expert: Inject conversation context
     
-    Note over Triage: Intelligent routing decision
-    alt Problem needs visualization
-        Triage->>Viz: Create chart for understanding
-        Viz->>Web: Chart.js config + explanation
-        Note over Web: Sliding visualization panel
-    else Problem needs step-by-step help
-        Triage->>Hint: Provide guidance
-        Hint->>Web: MathJax + help_text
-        Note over Web: MathJax rendering
+    alt Expert determines picture needed
+        Expert->>Expert: Create asyncio.Event()
+        Expert->>Mobile: Firestore: {'command': 'take_picture'}
+        Mobile->>Backend: HTTP POST raw image bytes
+        Backend->>Expert: upload_events[session_id].set() ⚡
+        Expert->>Expert: Part.from_bytes(image_data) injection
     end
     
-    Note over Backend: JSON cleaning per agent type
-    Backend->>Web: Real-time ADK events
+    Expert->>Expert: Analyze with full context + image
+    Expert->>Live: JSON response: {help_text, reasoning}
+    Live->>Web: Relay expert response
     Web->>User: Contextual help delivered
+    
+    Note over Expert,Live: No session conflicts - separate app_names
+    Note over Context: Live context automatically available to expert
 ```
 
-## 🤖 Agent Architecture & State Management
+## 🤖 Agent Architecture & State Management ✅ SIMPLIFIED
 
-### Sequential Agent Flow:
+### Current Agent Flow:
 ```
-LiveAgent → get_expert_help() → SequentialAgent:
-  1. StateEstablisherAgent (with take_picture_tool)
-  2. HelpTriageAgent (with HintAgent, VisualizerAgent as sub-agents)
+LiveAgent (hw_buddy_live) → get_expert_help() → ExpertTutorAgent (hw_buddy_expert)
+  - Separate sessions with context injection
+  - Single expert agent with integrated intelligence
+  - Context bridge via before_model_callback
 ```
 
 ### Agent Responsibilities:
 
-#### 1. **StateEstablisherAgent**
-- **Purpose**: Establishes context by taking pictures of homework
-- **Tools**: `take_picture_and_analyze_tool`
-- **State**: Stores image context in `problem_at_hand` output key
-- **Rate Limiting**: 5s between tool calls via `before_tool_callback`
-- **Image Injection**: Uses `before_model_callback` to inject raw image bytes
+#### 1. **Live Agent (hw_buddy_live)**
+- **Purpose**: Simple relay agent for audio streaming and user communication
+- **Tools**: `get_expert_help` function tool
+- **Session**: Uses `live_session_service` (InMemorySessionService)
+- **Role**: Passes user queries to expert and relays responses back
 
-#### 2. **HelpTriageAgent** 
-- **Purpose**: Intelligent routing between hint and visualization approaches
-- **Input**: `problem_at_hand` from StateEstablisher + `user_ask` from user
-- **Decision Logic**:
-  - **Use HintAgent**: Algebraic manipulation, step-by-step guidance, concept explanations
-  - **Use VisualizerAgent**: Systems of equations, graphing, visual representations
-- **Sub-agents**: `[HintAgent, VisualizerAgent]` as tools
+#### 2. **ExpertTutorAgent (hw_buddy_expert)** ✅ NEW
+- **Purpose**: Intelligent homework tutor with integrated decision-making
+- **Tools**: `take_picture_tool` for image capture
+- **Session**: Uses `expert_session_service` (separate InMemorySessionService)
+- **Model**: `gemini-2.5-flash` for speed and reliability
+- **Output**: JSON with `help_text` and `reasoning` fields
+- **Capabilities**:
+  - Automatically determines if picture is needed
+  - Provides step-by-step guidance AND visualizations as needed
+  - Has full conversation context from live session via callback
+  - Handles both math problems and general tutoring questions
 
-#### 3. **HintAgent**
-- **Purpose**: Provides step-by-step mathematical guidance
-- **Output**: JSON with `mathjax_content` and `help_text` fields
-- **JSON Cleaning**: Uses `clean_agent_response()` - includes MathJax backslash escaping
-- **Model**: `gemini-2.5-flash`
+#### 3. **Context Injection System** ✅ NEW
+- **Callback**: `inject_live_context_and_image()` on ExpertTutorAgent
+- **Purpose**: Bridges live and expert sessions automatically
+- **Functionality**:
+  - Fetches recent events from live session (`live_session_service`)
+  - Injects conversation context into expert LLM requests
+  - Shares images between sessions automatically
+  - No manual context management required
 
-#### 4. **VisualizerAgent**
-- **Purpose**: Creates interactive Chart.js visualizations
-- **Output**: JSON with `visualization_type`, `chart_config`, and `explanation` fields
-- **JSON Cleaning**: Uses `clean_visualization_response()` - no MathJax escaping needed
-- **Model**: `gemini-2.5-flash`
-- **Chart Types**: `linear_system`, `quadratic`, `linear`, `data_chart`
+### State Management ✅ UPDATED:
 
-### State Management:
-
-#### Session State (`hw_live_agent.py`):
+#### Live Session State (hw_buddy_live):
 ```python
 {
   "session_id": "abc123",
-  "adk_session": ADKSession,
-  "expert_session": ExpertSession,  # Separate session for expert help
+  "adk_session": ADKSession,  # Live session only
   "live_request_queue": LiveRequestQueue,
   "upload_events": {},  # asyncio.Event for image coordination
   "session_images": {},  # Raw image bytes storage
-  "current_image": None,
-  "problem_state": None,
-  "is_active": True
+  "is_active": True,
+  "temp:current_image_bytes": bytes,  # Image storage
+  "temp:current_image_mime_type": str
 }
 ```
 
-#### Context State (Tool/Callback Context):
+#### Expert Session State (hw_buddy_expert):
 ```python
 {
-  "pending_image_bytes": bytes,
-  "pending_image_mime_type": str,
-  "pending_user_ask": str,
-  "problem_at_hand": str,  # Output from StateEstablisher
-  "user_interaction_count": int,
-  "last_expert_call_time": float,  # Rate limiting
-  "last_take_picture_call_time": float  # Rate limiting
+  "session_id": "expert_abc123",  # Prefixed with "expert_"
+  "adk_session": ExpertADKSession,  # Separate expert session
+  "last_expert_help_time": float,  # Rate limiting (3s)
+  "temp:current_image_bytes": bytes,  # Copied from live session
+  "temp:current_image_mime_type": str
+}
+```
+
+#### Context Injection Data:
+```python
+{
+  "recent_conversation_context": str,  # Last 3 events from live session
+  "injected_images": List[Part],  # Images from live session
+  "live_session_events": List[Event]  # Automatically fetched
 }
 ```
 
@@ -546,3 +558,63 @@ Future:   Mobile → WebSocket → Backend → ADK Agent (full real-time)
 ```
 
 This will eliminate the last Firestore dependency and create a fully real-time, event-driven architecture.
+
+---
+
+## 📋 Latest Changes Summary (Current Session)
+
+### ✅ **COMPLETED CHANGES**:
+
+1. **🔄 Separated Session Services**:
+   - `live_session_service` for Live Agent (`hw_buddy_live` app)
+   - `expert_session_service` for Expert Agent (`hw_buddy_expert` app)
+   - Eliminates "Event from unknown agent" warnings
+
+2. **🎯 Simplified Agent Architecture**:
+   - **REMOVED**: SequentialAgent, StateEstablisher, HelpTriageAgent, HintAgent, VisualizerAgent
+   - **ADDED**: Single `ExpertTutorAgent` with integrated decision-making
+   - Reduces complexity while maintaining functionality
+
+3. **🔗 Context Injection System**:
+   - `inject_live_context_and_image()` callback on ExpertTutorAgent
+   - Automatically fetches recent events from live session
+   - Injects conversation context into expert LLM requests
+   - Shares images between sessions seamlessly
+
+4. **⚡ Performance Improvements**:
+   - Reduced rate limiting from 15s → 3s for expert help
+   - Simplified LLM call chain (max_llm_calls: 3)
+   - Single agent reduces latency and complexity
+
+### 🧪 **TESTING CHECKLIST**:
+
+- [ ] **No Session Conflicts**: Verify no "unknown agent" warnings in logs
+- [ ] **Expert Response Delivery**: Confirm expert responses reach live agent successfully  
+- [ ] **Context Injection**: Expert should have conversation context from live session
+- [ ] **Image Sharing**: Images uploaded to live session should be available to expert
+- [ ] **Rate Limiting**: Expert help requests limited to 3s intervals
+- [ ] **JSON Response Format**: Expert returns proper `{help_text, reasoning}` format
+
+### 🔍 **DEBUGGING**:
+
+**Key Log Messages to Watch**:
+```
+🔗 Injecting live session context from session {session_id}
+🔗 Injected context from X live session events  
+📸 Injecting image from live session: X bytes
+🎓 Created new expert session expert_{session_id}
+🎓 Found final response from ExpertTutorAgent
+```
+
+**Expected Behavior**:
+1. Live agent creates session in `hw_buddy_live` app
+2. Expert help creates separate session: `expert_{session_id}` in `hw_buddy_expert` app  
+3. Expert agent automatically gets live session context via callback
+4. No session conflicts or "unknown agent" warnings
+5. Expert responses successfully return to live agent
+
+### 📁 **Key Files Modified**:
+- `hw_live_agent.py`: Complete rewrite of agent architecture with separate sessions
+- Session services separated (`live_session_service` vs `expert_session_service`)
+- Context injection callback implementation
+- Simplified expert agent with integrated capabilities
