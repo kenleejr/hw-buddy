@@ -8,7 +8,7 @@ import logging
 import traceback
 import re
 import json
-from typing import Dict, Any, Optional, AsyncIterator
+from typing import Dict, Any, Optional, AsyncIterator, AsyncGenerator
 from PIL import Image
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -216,7 +216,16 @@ SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your
               When a user asks you for help you need to call the get_expert_help function. \
               This calls an agent which will take a picture of their homework and give you guidance on how to help them. \
               Pass the user's specific question or request as the 'user_ask' parameter to the get_expert_help function. \
-              This function will analyze the student's progress and return with "help_text" which you can relay back to the user."""
+              This function will analyze the student's progress and return with "help_text" which you can relay back to the user.\
+                
+              Example:\
+                user: "I need help with number one"\
+                you: "Ok I can help with that <calls expert_function with user_ask="help with number one>"\
+                you: waits...
+                expert_help (continuously sends updates): "<some update text>."\
+                you: "<some update text>"\
+                expert_help: "Here is the next step for number 1..."\
+                you: "Here is the next step for number 1..."""""
 
 
 class HWBuddyLiveAgent:
@@ -250,12 +259,25 @@ class HWBuddyLiveAgent:
             func=self._create_get_expert_help_function()
         )
         
+        # Create the stop_streaming function tool
+        def stop_streaming(function_name: str):
+            """Stop the streaming tool.
+            
+            Args:
+                function_name: The name of the streaming function to stop.
+            """
+            logger.info(f"Stopping streaming function: {function_name}")
+            # The ADK framework handles the actual stopping
+            pass
+        
+        self.stop_streaming_tool = FunctionTool(func=stop_streaming)
+        
         # Create the ADK agent with homework tutoring capabilities
         self.agent = Agent(
             name="homework_tutor",
             model=MODEL,
             instruction=SYSTEM_INSTRUCTION,
-            tools=[self.get_expert_help_tool]
+            tools=[self.get_expert_help_tool, self.stop_streaming_tool]
         )
         
         # Create runner for managing agent interactions
@@ -544,11 +566,11 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
     
     def _create_get_expert_help_function(self):
         """Create the get_expert_help function that uses the independent runner."""
-        async def get_expert_help(tool_context: ToolContext, user_ask: str) -> str:
+        async def get_expert_help(tool_context: ToolContext, user_ask: str) -> AsyncGenerator[str, None]:
             """
             Get expert help by running the independent expert help agent.
-            This function creates its own session and event loop, emitting events that
-            will be forwarded to the frontend for processing status updates.
+            This function streams intermediate events as they happen, allowing the live agent
+            to provide real-time narration of the expert help process.
             """
             try:
                 # Get current session ID for event forwarding
@@ -558,20 +580,24 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                 
                 if not current_session_id:
                     logger.error("No session_id found for expert help")
-                    return "I apologize, but I couldn't access the session to help you."
+                    yield "I apologize, but I couldn't access the session to help you."
+                    return
                 
                 # Get the session data including expert session
                 session_data = self.sessions.get(current_session_id)
                 if not session_data:
                     logger.error(f"Session data not found for {current_session_id}")
-                    return "I apologize, but I couldn't access the session data."
+                    yield "I apologize, but I couldn't access the session data."
+                    return
                 
                 expert_session = session_data.get("expert_session")
                 if not expert_session:
                     logger.error(f"Expert session not found for {current_session_id}")
-                    return "I apologize, but I couldn't access the expert session."
+                    yield "I apologize, but I couldn't access the expert session."
+                    return
                 
                 logger.info(f"Starting expert help for session {current_session_id}, user_ask: {user_ask}")
+                
                 
                 # Set up event forwarding callback
                 async def forward_events(session_id, event):
@@ -583,7 +609,6 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                         await websocket_manager._send_adk_event_update(current_session_id, event)
                 
                 # Run the expert help agent with event forwarding
-                final_response = ""
                 final_response_data = None
                 # Create run config
                 run_config = RunConfig(
@@ -602,10 +627,22 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                     # Forward events to the main session for frontend updates
                     await forward_events(current_session_id, event)
                     logger.info(f"Event from agent {event.author}")
+                    logger.info(f"Event {event}")
+                    
+                    # Provide real-time narration based on events
+                    if event.author == "HelpTriageAgent":
+                        # Check for transfer_to_agent to determine what type of help is being offered
+                        if hasattr(event, 'actions') and event.actions and hasattr(event.actions, 'transfer_to_agent'):
+                            transfer_agent = event.actions.transfer_to_agent
+                            if transfer_agent == 'HintAgent':
+                                yield "I'm preparing a hint to guide you through this problem..."
+                            elif transfer_agent == 'VisualizerAgent':
+                                yield "I'm preparing a visualization to help you understand this better..."
+    
                     
                     # Check if this is a final response but don't return yet - collect it
                     # Look for final responses from any of the expert agents
-                    if event.is_final_response() and not final_response_data and event.author in ["root_agent", "expert_help_agent", "VisualizerAgent", "HintAgent"]:
+                    if event.is_final_response() and not final_response_data and event.author in ["VisualizerAgent", "HintAgent"]:
                         logger.info(f"Found final response event from {event.author}!")
                         # Extract text content
                         if event.content:
@@ -620,7 +657,7 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                                     }
                                     break
                 
-                # Return the final response if we found one
+                # Yield final response if we found one
                 if final_response_data:
                     raw_response = final_response_data["response"]
                     
@@ -642,13 +679,16 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                         # Fallback to cleaned response if not valid JSON
                         final_response = cleaned_response
                         logger.info("🔍 Response not valid JSON, using cleaned response")
+                    
+                    yield final_response
+                else:
+                    yield "I've analyzed your homework and provided guidance above."
                 
                 logger.info(f"Expert help completed for session {current_session_id}")
-                return final_response or "I've analyzed your homework and provided guidance above."
                 
             except Exception as e:
                 logger.error(f"Error in get_expert_help: {str(e)}")
-                return f"I apologize, but I encountered an error while analyzing your homework: {str(e)}"
+                yield f"I apologize, but I encountered an error while analyzing your homework: {str(e)}"
         
         return get_expert_help
     
