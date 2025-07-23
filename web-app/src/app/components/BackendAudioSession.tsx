@@ -9,6 +9,7 @@ import { ChatPanel } from '@/components/ui/chat-panel';
 import { ProcessingStatus } from './ProcessingStatus';
 import { MathJaxDisplay } from './MathJaxDisplay';
 import VisualizationPanel from './VisualizationPanel';
+import { SeeWhatISeeButton } from '@/components/ui/see-what-i-see-button';
 
 // Helper function to normalize backslashes for MathJax (from GeminiLiveSession)
 const normalizeMathJaxBackslashes = (content: string): string => {
@@ -166,6 +167,15 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         setIsAnalyzingImage(true);
         setStatus('📸 Taking picture of your homework...');
         setProcessingStatus(message.data?.message || 'Analyzing your homework...');
+        
+        // Set image URL when a picture is taken (using current session)
+        if (message.data?.tool === 'take_picture_and_analyze_tool' || 
+            message.data?.message?.includes('picture')) {
+          // Check if image is available in the session after a brief delay
+          setTimeout(() => {
+            setLastImageUrl(`http://localhost:8000/sessions/${sessionId}/image`);
+          }, 1000); // Give time for the image to be stored in session
+        }
         break;
         
       case 'turn_complete':
@@ -212,6 +222,10 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         
       case 'image_received':
         setProcessingStatus('Image received, analyzing...');
+        // Set image URL when image is received and stored in session
+        const imageUrl = `http://localhost:8000/sessions/${sessionId}/image`;
+        console.log('🔌 Setting image URL:', imageUrl);
+        setLastImageUrl(imageUrl);
         break;
         
       case 'image_analyzed':
@@ -229,7 +243,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         break;
         
       case 'adk_event':
-        console.log('🔌 ADK Event:', message.event_type, message.data);
+        console.log('🔌 ADK Event:', message.data);
         
         // Use EventParser to handle the event (same as GeminiLiveSession)
         const eventData: ADKEventData = {
@@ -262,6 +276,12 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
           console.log('🔌 Updating visualization from EventParser:', parseResult.visualizationConfig);
           setVisualizationConfig(parseResult.visualizationConfig);
           setShowVisualization(true);
+        }
+
+        // Handle image URL updates
+        if (parseResult.shouldUpdateImage && parseResult.imageUrl) {
+          console.log('🔌 Updating image URL from EventParser:', parseResult.imageUrl);
+          setLastImageUrl(parseResult.imageUrl);
         }
         
         if (parseResult.clearProcessingStatus) {
@@ -377,6 +397,16 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
             {connectionStatus === 'connected' ? '🔗 Connected' : '❌ Disconnected'}
           </div>
         </div>
+
+        {/* See What I See Button - Top left corner */}
+        {lastImageUrl && (
+          <div className="fixed top-20 left-4 z-50">
+            <SeeWhatISeeButton 
+              imageUrl={lastImageUrl}
+              isAnalyzing={isAnalyzingImage}
+            />
+          </div>
+        )}
         
         {/* Central Start Button - only show when not recording and no conversation */}
         {!isRecording && conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && connectionStatus === 'connected' && (
@@ -398,6 +428,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
               
               {/* Processing Status - Below MathJax */}
               <ProcessingStatus ref={processingStatusRef} status={processingStatus} />
+              
             </div>
             
             {/* Chat Panel - Hidden by default, can be toggled if needed */}

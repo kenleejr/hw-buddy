@@ -42,6 +42,13 @@ export function ImageModal({ isOpen, onClose, imageUrl, isAnalyzing }: ImageModa
                   src={imageUrl} 
                   alt="Your homework"
                   className="w-full h-auto max-h-[80vh] object-contain"
+                  onError={(e) => {
+                    console.error('Failed to load image:', imageUrl);
+                    e.currentTarget.style.display = 'none';
+                  }}
+                  onLoad={() => {
+                    console.log('Image loaded successfully:', imageUrl);
+                  }}
                 />
                 
                 {/* Analysis Overlay */}

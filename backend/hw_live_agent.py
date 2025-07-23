@@ -387,10 +387,9 @@ class HWBuddyLiveAgent:
                     tool_context.state["pending_image_mime_type"] = mime_type
                     tool_context.state["pending_user_ask"] = user_ask
                     
-                    # Clean up session image storage
-                    if current_session_id in agent_instance.session_images:
-                        del agent_instance.session_images[current_session_id]
-                        logger.info(f"📸 Cleaned up session image for {current_session_id}")
+                    # Don't clean up session image storage immediately - keep it for frontend display
+                    # The image will be cleaned up when the session ends or a new image is uploaded
+                    logger.info(f"📸 Keeping image in session storage for frontend display")
                     
                     return "Image captured successfully. I can now see your homework."
                     
@@ -630,7 +629,6 @@ class HWBuddyLiveAgent:
                         # Forward events to the main session for frontend updates
                         await forward_events(current_session_id, event)
                         logger.info(f"Event from agent {event.author}")
-                        # logger.info(f"Event {event}")
                         
                         # Provide real-time narration based on events
                         if event.author == "HelpTriageAgent":
@@ -946,6 +944,10 @@ class HWBuddyLiveAgent:
             Storage confirmation
         """
         try:
+            # Clean up any existing image for this session before storing new one
+            if session_id in self.session_images:
+                logger.info(f"📸 Replacing existing image for session {session_id}")
+            
             # Store image data
             self.session_images[session_id] = {
                 'bytes': image_data,
@@ -980,6 +982,17 @@ class HWBuddyLiveAgent:
         if session_id in self.sessions:
             self.sessions[session_id]["is_active"] = False
             del self.sessions[session_id]
+            
+            # Clean up session image storage
+            if session_id in self.session_images:
+                del self.session_images[session_id]
+                logger.info(f"📸 Cleaned up session image for ended session {session_id}")
+            
+            # Clean up any pending upload events
+            if session_id in self.upload_events:
+                del self.upload_events[session_id]
+                logger.info(f"📸 Cleaned up upload event for ended session {session_id}")
+            
             logger.info(f"Ended session {session_id}")
     
     def get_session_status(self, session_id: str) -> Dict[str, Any]:

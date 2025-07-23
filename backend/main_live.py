@@ -15,6 +15,7 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -284,6 +285,31 @@ async def get_image_status(session_id: str):
     except Exception as e:
         logger.error(f"Error getting image status for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting image status: {str(e)}")
+
+
+@app.get("/sessions/{session_id}/image")
+async def get_session_image(session_id: str):
+    """Get the current image for a session."""
+    try:
+        # Validate session ID
+        if not image_handler.validate_session_id(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+        
+        # Check if the session has an image
+        if session_id not in hw_agent.session_images:
+            raise HTTPException(status_code=404, detail="No image found for this session")
+        
+        image_data = hw_agent.session_images[session_id]
+        image_bytes = image_data['bytes']
+        mime_type = image_data['mime_type']
+        
+        return Response(content=image_bytes, media_type=mime_type)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving image for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error serving image: {str(e)}")
 
 
 # Legacy compatibility endpoint (for gradual migration)

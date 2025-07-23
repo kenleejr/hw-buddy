@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
+import { ActionCards } from './ActionCards';
 
 interface MathJaxDisplayProps {
   content: string;
+  onActionClick?: (action: string) => void;
 }
 
-export function MathJaxDisplay({ content }: MathJaxDisplayProps) {
+export function MathJaxDisplay({ content, onActionClick }: MathJaxDisplayProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [hasContent, setHasContent] = useState(false);
@@ -58,13 +60,7 @@ export function MathJaxDisplay({ content }: MathJaxDisplayProps) {
   };
 
   if (!content) {
-    return (
-      <div className="flex justify-center items-center min-h-[200px]">
-        <div className="text-gray-400 text-lg">
-          📚 Your problem will appear here...
-        </div>
-      </div>
-    );
+    return <ActionCards onCardClick={onActionClick} />;
   }
 
   return (

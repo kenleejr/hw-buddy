@@ -32,6 +32,8 @@ export interface ParsedEventResult {
   clearProcessingStatus?: boolean;
   visualizationConfig?: any;
   shouldShowVisualization?: boolean;
+  imageUrl?: string;
+  shouldUpdateImage?: boolean;
 }
 
 export class EventParser {
@@ -163,6 +165,14 @@ export class EventParser {
               result.mathJaxContent = this.normalizeMathJax(jsonResponse.mathjax_content);
               result.shouldUpdateMathJax = true;
             }
+            
+            // Handle image URLs
+            if (jsonResponse.image_url) {
+              console.log('🔍 HintAgent JSON contains image_url field:', jsonResponse.image_url);
+              result.imageUrl = this.convertSessionUrlToBackendUrl(jsonResponse.image_url);
+              result.shouldUpdateImage = true;
+            }
+            
             // help_text is handled by the live agent audio, not the frontend display
           }
         } catch (e) {
@@ -281,5 +291,16 @@ export class EventParser {
     normalized = normalized.replace(/\\\\/g, '\\');
     
     return normalized;
+  }
+
+  /**
+   * Convert session:sessionId URLs to proper backend URLs
+   */
+  private static convertSessionUrlToBackendUrl(imageUrl: string): string {
+    if (imageUrl && imageUrl.startsWith('session:')) {
+      const sessionId = imageUrl.replace('session:', '');
+      return `http://localhost:8000/sessions/${sessionId}/image`;
+    }
+    return imageUrl;
   }
 }
