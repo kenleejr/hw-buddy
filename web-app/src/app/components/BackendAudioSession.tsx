@@ -192,6 +192,8 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         setStatus('Go ahead, I\'m listening!');
         setCurrentAssistantMessage('');
         setIsAnalyzingImage(false);
+        setProcessingStatus(''); // Clear any processing status
+        setCurrentMathJax(''); // Clear current math content to prepare for new response
         break;
         
       case 'error':
@@ -295,6 +297,18 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
       // Clear any previous messages for new interaction
       setCurrentUserMessage('');
       setCurrentAssistantMessage('');
+      
+      // Clear previous content and interrupt audio when starting new recording
+      if (currentMathJax || processingStatus) {
+        // Immediately interrupt any playing audio
+        audioClientRef.current.interruptAudio();
+        
+        setProcessingStatus('New question detected - interrupting previous response...');
+        setTimeout(() => {
+          setCurrentMathJax('');
+          setProcessingStatus('');
+        }, 1000);
+      }
       
     } catch (err: any) {
       console.error('🎤 Error starting recording:', err);

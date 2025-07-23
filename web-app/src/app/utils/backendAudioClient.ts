@@ -46,6 +46,7 @@ export class BackendAudioClient {
   private isRecording = false;
   private audioQueue: AudioBuffer[] = [];
   private nextPlayTime = 0;
+  private activeSources: Set<AudioBufferSourceNode> = new Set();
   
   // Event handlers
   public onMessage: ((message: BackendMessage) => void) | null = null;
@@ -276,7 +277,6 @@ export class BackendAudioClient {
       case 'agent_ready':
       case 'tool_call':
       case 'turn_complete':
-      case 'interrupted':
       case 'error':
       case 'text':
       case 'image_received':
@@ -284,6 +284,12 @@ export class BackendAudioClient {
       case 'recording_started':
       case 'recording_stopped':
       case 'adk_event':
+        this.onMessage?.(message);
+        break;
+        
+      case 'interrupted':
+        // Immediately stop all audio playback
+        this.interruptAudio();
         this.onMessage?.(message);
         break;
         
@@ -337,6 +343,9 @@ export class BackendAudioClient {
       source.buffer = audioBuffer;
       source.connect(this.outputGainNode);
 
+      // Track active source for interruption capability
+      this.activeSources.add(source);
+
       // Schedule playback
       this.nextPlayTime = Math.max(
         this.nextPlayTime,
@@ -347,12 +356,40 @@ export class BackendAudioClient {
       this.nextPlayTime += audioBuffer.duration;
 
       source.onended = () => {
-        // Cleanup when playback ends
+        // Remove from active sources when playback ends
+        this.activeSources.delete(source);
       };
 
     } catch (error) {
       console.error('🔊 Error scheduling audio playback:', error);
     }
+  }
+
+  /**
+   * Interrupt all currently playing audio
+   */
+  public interruptAudio(): void {
+    console.log('🔊 Interrupting audio playback, stopping', this.activeSources.size, 'active sources');
+    
+    // Stop all currently playing sources
+    for (const source of this.activeSources) {
+      try {
+        source.stop();
+      } catch (error) {
+        // Source may have already ended, ignore error
+        console.debug('🔊 Source already stopped:', error);
+      }
+    }
+    
+    // Clear active sources
+    this.activeSources.clear();
+    
+    // Reset playback timing to current time to prevent delays
+    if (this.outputAudioContext) {
+      this.nextPlayTime = this.outputAudioContext.currentTime;
+    }
+    
+    console.log('🔊 Audio interruption complete');
   }
 
   /**

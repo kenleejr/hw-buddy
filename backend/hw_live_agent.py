@@ -28,7 +28,7 @@ from google.genai.types import Part, UserContent, Content
 from google import genai
 
 # Local imports
-from prompts import STATE_ESTABLISHER_AGENT_PROMPT, HINT_AGENT_PROMPT
+from prompts import *
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -39,6 +39,9 @@ logging.getLogger('google.adk.models.google_llm').setLevel(logging.WARNING)
 logging.getLogger('google_genai.models').setLevel(logging.WARNING)
 logging.getLogger('google_genai.types').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
+
+# Suppress OpenTelemetry context errors during interruption (these are expected)
+logging.getLogger('opentelemetry.context').setLevel(logging.CRITICAL)
 
 def escape_mathjax_backslashes(text: str) -> str:
     """
@@ -211,7 +214,7 @@ VOICE_NAME = "Aoede"         # Voice for responses
 MODEL = "gemini-2.0-flash-live-001"
 
 # System instruction for the homework tutor
-SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your sole responsibility is to relay information such as user questions to a backend expert help agent.  \
+SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your sole responsibility is to relay user questions to a backend expert help agent.  \
               When the agent returns, you relay its response back to the user. \
               When a user asks you for help you need to call the get_expert_help function. \
               This calls an agent which will take a picture of their homework and give you guidance on how to help them. \
@@ -220,12 +223,13 @@ SYSTEM_INSTRUCTION = """You are a text to speech and speech to text system. Your
                 
               Example:\
                 user: "I need help with number one"\
-                you: "Ok I can help with that <calls expert_function with user_ask="help with number one>"\
-                you: waits...
+                you: <calls expert_function with user_ask="help with number one>"\
                 expert_help (continuously sends updates): "<some update text>."\
                 you: "<some update text>"\
                 expert_help: "Here is the next step for number 1..."\
-                you: "Here is the next step for number 1..."""""
+                you: "Here is the next step for number 1...
+                
+            """""
 
 
 class HWBuddyLiveAgent:
@@ -239,6 +243,10 @@ class HWBuddyLiveAgent:
         # Event coordination for image uploads
         self.upload_events: Dict[str, asyncio.Event] = {}
         self.session_images: Dict[str, Dict[str, Any]] = {}
+        
+        # Task cancellation support
+        self.active_tasks: Dict[str, asyncio.Task] = {}
+        self.cancellation_events: Dict[str, asyncio.Event] = {}
         
         
         # Initialize Firebase for Firestore communication
@@ -254,9 +262,9 @@ class HWBuddyLiveAgent:
             session_service=self.expert_session_service,
         )
         
-        # Create the get_expert_help function tool
+        # Create the get_expert_help function tool - with task tracking
         self.get_expert_help_tool = FunctionTool(
-            func=self._create_get_expert_help_function()
+            func=self._create_get_expert_help_function_with_tracking()
         )
         
         # Create the stop_streaming function tool
@@ -464,25 +472,7 @@ class HWBuddyLiveAgent:
         visualizer_agent = LlmAgent(
             name="VisualizerAgent",
             model="gemini-2.5-flash",
-            instruction="""You are a visualization expert for math problems. Your job is to create interactive Chart.js visualizations to help students understand mathematical concepts.
-
-Given a problem description, generate JavaScript code that creates a Chart.js visualization. Focus on:
-- Systems of equations: Plot lines on a coordinate plane
-- Quadratic functions: Show parabolas with key features
-- Linear functions: Show lines with slope and intercepts
-- Data analysis: Create appropriate charts for datasets
-
-Return ONLY a JSON object with this structure:
-{
-  "visualization_type": "linear_system|quadratic|linear|data_chart",
-  "chart_config": {
-    // Complete Chart.js configuration object
-  },
-  "explanation": "Brief explanation of what the visualization shows and how it helps"
-}
-
-The chart_config should be a complete Chart.js configuration that can be passed directly to new Chart().
-Use meaningful colors, labels, and formatting. Include gridlines and axis labels."""
+            instruction=VISUALIZER_PROMPT
         )
         
         # Create the help triage agent that decides between hint and visualization
@@ -490,27 +480,7 @@ Use meaningful colors, labels, and formatting. Include gridlines and axis labels
             name="HelpTriageAgent", 
             model="gemini-2.5-flash",
             sub_agents=[hint_agent, visualizer_agent],
-            instruction="""You are a tutoring coordinator that decides the best way to help a student based on their question and the problem they're working on.
-
-You have access to two tools:
-1. "HintAgent" - Provides step-by-step hints and guidance
-2. "VisualizerAgent" - Creates interactive visualizations (charts, graphs)
-
-Given the user's question: {pending_user_ask} and the problem description: {problem_at_hand}, decide which approach would be most helpful:
-
-Use HintAgent when:
-- Student needs single next step hint
-- Problem involves algebraic manipulation
-- Student is stuck on a specific step
-- Conceptual explanation is needed
-
-Use VisualizerAgent when:
-- Problem involves systems of equations (2+ variables)
-- Graphing or plotting would help understanding
-- Student would benefit from seeing the visual representation
-- Problem involves functions, lines, parabolas, or data
-
-Always call exactly ONE tool based on your analysis. Pass the full context including both the user's question and the problem description to the chosen tool."""
+            instruction=HELP_TRIAGE_AGENT
         )
         
         # Create the state establisher agent
@@ -583,6 +553,31 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                     yield "I apologize, but I couldn't access the session to help you."
                     return
                 
+                # Signal interruption to previous expert help task for this session
+                if current_session_id in self.active_tasks:
+                    logger.info(f"🚫 Interrupting previous task for session {current_session_id}")
+                    
+                    # Signal interruption to frontend immediately
+                    try:
+                        from audio_websocket_server import get_audio_websocket_manager
+                        websocket_manager = get_audio_websocket_manager()
+                        if websocket_manager:
+                            await websocket_manager.send_interruption(current_session_id)
+                    except Exception as e:
+                        logger.warning(f"Could not send interruption signal: {e}")
+                    
+                    # Signal cancellation to the running task via event (more graceful than task.cancel())
+                    if current_session_id in self.cancellation_events:
+                        self.cancellation_events[current_session_id].set()
+                        logger.info(f"🚫 Set cancellation event for session {current_session_id}")
+                    
+                    # Give the previous task a brief moment to handle the cancellation gracefully
+                    await asyncio.sleep(0.1)
+                
+                # Create cancellation event for this request
+                cancellation_event = asyncio.Event()
+                self.cancellation_events[current_session_id] = cancellation_event
+                
                 # Get the session data including expert session
                 session_data = self.sessions.get(current_session_id)
                 if not session_data:
@@ -618,44 +613,68 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                 
                 # Run the agent using the actual session ID from the created/retrieved session
                 content = UserContent(parts=[Part(text=user_ask)])
-                async for event in self.expert_help_runner.run_async(
-                    session_id=expert_session.id,
-                    new_message=content,
-                    run_config=run_config,
-                    user_id="student"
-                ):
-                    # Forward events to the main session for frontend updates
-                    await forward_events(current_session_id, event)
-                    logger.info(f"Event from agent {event.author}")
-                    logger.info(f"Event {event}")
+                
+                try:
+                    async for event in self.expert_help_runner.run_async(
+                        session_id=expert_session.id,
+                        new_message=content,
+                        run_config=run_config,
+                        user_id="student"
+                    ):
+                        # Check for cancellation before processing each event
+                        if cancellation_event.is_set():
+                            logger.info(f"🚫 Request cancelled, stopping event processing for session {current_session_id}")
+                            yield "I've stopped the previous request to focus on your new question."
+                            return
                     
-                    # Provide real-time narration based on events
-                    if event.author == "HelpTriageAgent":
-                        # Check for transfer_to_agent to determine what type of help is being offered
-                        if hasattr(event, 'actions') and event.actions and hasattr(event.actions, 'transfer_to_agent'):
-                            transfer_agent = event.actions.transfer_to_agent
-                            if transfer_agent == 'HintAgent':
-                                yield "I'm preparing a hint to guide you through this problem..."
-                            elif transfer_agent == 'VisualizerAgent':
-                                yield "I'm preparing a visualization to help you understand this better..."
-    
-                    
-                    # Check if this is a final response but don't return yet - collect it
-                    # Look for final responses from any of the expert agents
-                    if event.is_final_response() and not final_response_data and event.author in ["VisualizerAgent", "HintAgent"]:
-                        logger.info(f"Found final response event from {event.author}!")
-                        # Extract text content
-                        if event.content:
-                            for part in event.content.parts:
-                                logger.info(f"Checking part: {part}")
-                                if hasattr(part, 'text') and part.text:
-                                    logger.info(f"🔍 Expert help agent final output: {part.text}")
-                                    
-                                    # Store the response text (cleaning now happens in event forwarding)
-                                    final_response_data = {
-                                        "response": part.text
-                                    }
-                                    break
+                        # Forward events to the main session for frontend updates
+                        await forward_events(current_session_id, event)
+                        logger.info(f"Event from agent {event.author}")
+                        # logger.info(f"Event {event}")
+                        
+                        # Provide real-time narration based on events
+                        if event.author == "HelpTriageAgent":
+                            # Check for cancellation before yielding
+                            if cancellation_event.is_set():
+                                logger.info(f"🚫 Request cancelled during triage, stopping for session {current_session_id}")
+                                return
+                                
+                            # Check for transfer_to_agent to determine what type of help is being offered
+                            if hasattr(event, 'actions') and event.actions and hasattr(event.actions, 'transfer_to_agent'):
+                                transfer_agent = event.actions.transfer_to_agent
+                                if transfer_agent == 'HintAgent':
+                                    yield "I'm preparing a hint to guide you through this problem..."
+                                elif transfer_agent == 'VisualizerAgent':
+                                    yield "I'm preparing a visualization to help you understand this better..."
+        
+                        
+                        # Check if this is a final response but don't return yet - collect it
+                        # Look for final responses from any of the expert agents
+                        if event.is_final_response() and not final_response_data and event.author in ["VisualizerAgent", "HintAgent"]:
+                            logger.info(f"Found final response event from {event.author}!")
+                            # Extract text content
+                            if event.content:
+                                for part in event.content.parts:
+                                    logger.info(f"Checking part: {part}")
+                                    if hasattr(part, 'text') and part.text:
+                                        logger.info(f"🔍 Expert help agent final output: {part.text}")
+                                        
+                                        # Store the response text (cleaning now happens in event forwarding)
+                                        final_response_data = {
+                                            "response": part.text
+                                        }
+                                        break
+                
+                except (GeneratorExit, RuntimeError) as e:
+                    # Handle ADK framework cancellation errors gracefully
+                    if cancellation_event.is_set():
+                        logger.info(f"🚫 ADK agent generator closed due to cancellation for session {current_session_id}")
+                        yield "I've stopped the previous request to focus on your new question."
+                        return
+                    else:
+                        logger.warning(f"ADK agent generator closed unexpectedly: {e}")
+                        yield "I encountered an issue while processing. Let me try to help you with a new request."
+                        return
                 
                 # Yield final response if we found one
                 if final_response_data:
@@ -686,11 +705,59 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
                 
                 logger.info(f"Expert help completed for session {current_session_id}")
                 
+            except asyncio.CancelledError:
+                logger.info(f"🚫 Expert help task cancelled for session {current_session_id}")
+                yield "I've stopped the previous request to focus on your new question."
+                raise
             except Exception as e:
                 logger.error(f"Error in get_expert_help: {str(e)}")
                 yield f"I apologize, but I encountered an error while analyzing your homework: {str(e)}"
+            finally:
+                # Clean up tracking data
+                if current_session_id in self.cancellation_events:
+                    del self.cancellation_events[current_session_id]
+                if current_session_id in self.active_tasks:
+                    del self.active_tasks[current_session_id]
         
         return get_expert_help
+    
+    def _create_get_expert_help_function_with_tracking(self):
+        """Create the get_expert_help function with task tracking."""
+        
+        # Get the core function
+        core_get_expert_help = self._create_get_expert_help_function()
+        
+        async def get_expert_help_with_tracking(tool_context: ToolContext, user_ask: str):
+            """Wrapper that tracks the expert help task for cancellation."""
+            # Get current session ID
+            current_session_id = getattr(self, 'current_session_id', None)
+            if not current_session_id and self.sessions:
+                current_session_id = list(self.sessions.keys())[0]
+            
+            if not current_session_id:
+                logger.error("No session_id found for expert help tracking")
+                async for result in core_get_expert_help(tool_context, user_ask):
+                    yield result
+                return
+                
+            try:
+                # Store current task for potential cancellation
+                current_task = asyncio.current_task()
+                if current_task:
+                    self.active_tasks[current_session_id] = current_task
+                    logger.info(f"📋 Registered expert help task for session {current_session_id}")
+                
+                # Run the core function
+                async for result in core_get_expert_help(tool_context, user_ask):
+                    yield result
+                    
+            finally:
+                # Clean up task tracking
+                if current_session_id in self.active_tasks:
+                    del self.active_tasks[current_session_id]
+                    logger.info(f"📋 Cleaned up expert help task for session {current_session_id}")
+        
+        return get_expert_help_with_tracking
     
     def _init_firebase(self):
         """Initialize Firebase connection for Firestore communication."""
@@ -840,6 +907,14 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
             live_request_queue=session_data["live_request_queue"],
             run_config=session_data["run_config"],
         ):
+            if event.turn_complete or event.interrupted:
+                message = {
+                    "turn_complete": event.turn_complete,
+                    "interrupted": event.interrupted,
+                }
+                yield f"data: {json.dumps(message)}\n\n"
+                logger.info(f"[AGENT TO CLIENT]: {message}")
+                continue
             yield event
     
     async def send_audio(self, session_id: str, audio_data: bytes):

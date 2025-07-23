@@ -109,6 +109,13 @@ class AudioWebSocketManager:
             logger.error(f"Error sending message to session {session_id}: {e}")
             self.disconnect(session_id)
     
+    async def send_interruption(self, session_id: str):
+        """Send an interruption signal to stop audio playback immediately."""
+        logger.info(f"🚫 Sending audio interruption signal to session {session_id}")
+        await self.send_message(session_id, "interrupted", {
+            "message": "Audio interrupted for new request"
+        })
+    
     async def send_event_update(self, session_id: str, event_type: str, event_data: dict):
         """Send an ADK event update to the frontend (compatible with GeminiLiveSession)."""
         if not self.is_connected(session_id):
@@ -191,12 +198,25 @@ class AudioWebSocketManager:
                     
             except asyncio.CancelledError:
                 logger.info(f"Agent session cancelled for {session_id}")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+                logger.info(f"Client disconnected for session {session_id}: {e}")
+            except RuntimeError as e:
+                if "await wasn't used with future" in str(e):
+                    logger.info(f"Agent session interrupted due to cancellation for {session_id}: {e}")
+                else:
+                    logger.error(f"Runtime error in agent session for {session_id}: {e}")
+                    logger.error(traceback.format_exc())
+            except (GeneratorExit, StopAsyncIteration) as e:
+                logger.info(f"Agent session generator closed for {session_id}: {e}")
             except Exception as e:
                 logger.error(f"Error in agent session for {session_id}: {e}")
                 logger.error(traceback.format_exc())
-                await self.send_message(session_id, "error", {
-                    "message": f"Agent error: {str(e)}"
-                })
+                try:
+                    await self.send_message(session_id, "error", {
+                        "message": f"Agent error: {str(e)}"
+                    })
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    logger.info(f"Could not send error message, client disconnected for {session_id}")
         
         # Create and store the task
         task = asyncio.create_task(agent_session_handler())
