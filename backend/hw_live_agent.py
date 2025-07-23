@@ -881,10 +881,13 @@ Always call exactly ONE tool based on your analysis. Pass the full context inclu
         }
 
 
-# Global instance
-hw_live_agent = HWBuddyLiveAgent()
+# Global instance (lazy initialization)
+hw_live_agent = None
 
 
 def get_hw_live_agent() -> HWBuddyLiveAgent:
     """Get the global homework live agent instance."""
+    global hw_live_agent
+    if hw_live_agent is None:
+        hw_live_agent = HWBuddyLiveAgent()
     return hw_live_agent
