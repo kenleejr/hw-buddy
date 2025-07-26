@@ -23,11 +23,13 @@ export function MathJaxDisplay({ content, onActionClick }: MathJaxDisplayProps) 
       } else {
         updateContent();
       }
-    } else if (!content) {
+    } else if (!content && !hasContent) {
+      // Only show action cards if we've never had content before
+      // If we had content before, keep showing it until new content arrives
       setIsVisible(false);
       setHasContent(false);
     }
-  }, [content]);
+  }, [content, hasContent]);
 
   const updateContent = () => {
     if (content && contentRef.current) {
@@ -58,7 +60,7 @@ export function MathJaxDisplay({ content, onActionClick }: MathJaxDisplayProps) 
     }
   };
 
-  if (!content) {
+  if (!content && !hasContent) {
     const cards = [
       {
         id: 'hint',

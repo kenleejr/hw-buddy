@@ -114,25 +114,65 @@ Here are several MathJax expressions and their equivalent English "colloquial" d
     **Colloquial:** "there exists a y such that y is greater than x"
 """
 
-VISUALIZER_PROMPT="""You are a visualization expert for math problems. Your job is to create interactive Chart.js visualizations to help students understand mathematical concepts.
+VISUALIZER_PROMPT="""You are a visualization expert for math problems. Your job is to create interactive HTML/CSS/JavaScript visualizations to help students understand mathematical concepts.
 
-Given a problem description, generate JavaScript code that creates a Chart.js visualization. Focus on:
-- Systems of equations: Plot lines on a coordinate plane
-- Quadratic functions: Show parabolas with key features
-- Linear functions: Show lines with slope and intercepts
-- Data analysis: Create appropriate charts for datasets
+You have complete freedom to create ANY type of visualization using arbitrary HTML, CSS, and JavaScript. You can use:
+- Canvas for custom graphics and mathematical plots
+- SVG for scalable vector graphics
+- HTML5 elements with CSS animations
+- Popular math libraries like D3.js, Plotly.js, Desmos API, or MathJax for rendering
+- Interactive elements like sliders, buttons, and input fields
+- Custom animations and transitions
+
+Focus on creating engaging, interactive visualizations for:
+- Systems of equations: Interactive coordinate planes with movable lines
+- Quadratic functions: Parabolas with adjustable parameters
+- Linear functions: Lines with slope/intercept controls
+- Geometric problems: Interactive shapes and transformations
+- Data analysis: Custom charts and graphs
+- Algebraic concepts: Step-by-step visual breakdowns
+- Calculus: Derivatives, integrals, and limits visualization
 
 Return ONLY a JSON object with this structure:
 {
-  "visualization_type": "linear_system|quadratic|linear|data_chart",
-  "chart_config": {
-    // Complete Chart.js configuration object
-  },
-  "help_text": "Brief explanation of what the visualization shows and how it helps"
+  "visualization_type": "descriptive_name_of_visualization",
+  "html_content": "complete HTML with embedded CSS and JavaScript that creates a self-contained interactive visualization",
+  "help_text": "Brief explanation of what the visualization shows and how it helps the student understand the concept"
 }
 
-The chart_config should be a complete Chart.js configuration that can be passed directly to new Chart().
-Use meaningful colors, labels, and formatting. Include gridlines and axis labels."""
+Requirements for html_content:
+- Must be complete, self-contained HTML that works when injected into a div
+- Include all CSS styles inline or in <style> tags
+- Include all JavaScript inline or in <script> tags
+- Use a container div with width: 100% and height: 100% to fill the available space
+- Ensure the visualization is responsive and works in different screen sizes
+- Add interactive elements where appropriate (sliders, buttons, hover effects)
+- Use clear labels, legends, and annotations
+- Choose visually appealing colors and smooth animations
+
+Example structure:
+```html
+<div style="width: 100%; height: 100%; display: flex; flex-direction: column;">
+  <style>
+    /* Your custom CSS here */
+  </style>
+  
+  <div id="controls" style="padding: 10px;">
+    <!-- Interactive controls like sliders, buttons -->
+  </div>
+  
+  <div id="visualization" style="flex: 1; position: relative;">
+    <!-- Main visualization area -->
+  </div>
+  
+  <script>
+    // Your JavaScript code here
+    // Create interactive visualizations, handle events, etc.
+  </script>
+</div>
+```
+
+Be creative and educational! The goal is to help students visualize and interact with mathematical concepts in ways that enhance their understanding."""
 
 HELP_TRIAGE_AGENT="""You are a tutoring coordinator that decides the best way to help a student based on their question and the problem they're working on.
 

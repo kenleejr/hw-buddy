@@ -238,10 +238,17 @@ export class EventParser {
         
         try {
           const jsonResponse = JSON.parse(textContent);
-          if (jsonResponse && typeof jsonResponse === 'object' && jsonResponse.chart_config) {
-            console.log('🔍 VisualizerAgent contains chart configuration');
-            result.visualizationConfig = jsonResponse;
-            result.shouldShowVisualization = true;
+          console.log('🔍 VisualizerAgent parsed JSON:', jsonResponse);
+          if (jsonResponse && typeof jsonResponse === 'object') {
+            // Support new html_content format or legacy chart_config format
+            if (jsonResponse.html_content || jsonResponse.chart_config) {
+              console.log('🔍 VisualizerAgent contains visualization configuration');
+              console.log('🔍 Setting shouldShowVisualization = true');
+              result.visualizationConfig = jsonResponse;
+              result.shouldShowVisualization = true;
+            } else {
+              console.log('🔍 VisualizerAgent JSON missing html_content and chart_config');
+            }
           }
         } catch (e) {
           console.log('🔍 VisualizerAgent content not valid JSON:', e);

@@ -48,6 +48,9 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
   const [processingStatus, setProcessingStatus] = useState('');
   const [visualizationConfig, setVisualizationConfig] = useState<any>(null);
   const [showVisualization, setShowVisualization] = useState(false);
+  const [hasRenderedFirstMathJax, setHasRenderedFirstMathJax] = useState(false);
+  const [processingStatusUpdateCount, setProcessingStatusUpdateCount] = useState(0);
+  const [currentInteractionId, setCurrentInteractionId] = useState<string | null>(null);
   
   const audioClientRef = useRef<BackendAudioClient | null>(null);
   const processingStatusRef = useRef<HTMLDivElement>(null);
@@ -58,9 +61,13 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
   //   console.log('🎵 currentMathJax state changed:', currentMathJax);
   // }, [currentMathJax]);
 
-  // Auto-scroll to ProcessingStatus when MathJax content updates
+  // Track when first MathJax renders and auto-scroll to ProcessingStatus
   useEffect(() => {
-    if (currentMathJax && processingStatusRef.current) {
+    if (currentMathJax && !hasRenderedFirstMathJax) {
+      setHasRenderedFirstMathJax(true);
+    }
+    
+    if (currentMathJax && processingStatusRef.current && !hasRenderedFirstMathJax) {
       setTimeout(() => {
         processingStatusRef.current?.scrollIntoView({ 
           behavior: 'smooth', 
@@ -69,7 +76,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         });
       }, 50);
     }
-  }, [currentMathJax]);
+  }, [currentMathJax, hasRenderedFirstMathJax]);
 
   // Auto-scroll to ProcessingStatus when it appears
   useEffect(() => {
@@ -166,6 +173,12 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         console.log('🔌 Tool call:', message.data);
         setIsAnalyzingImage(true);
         setStatus('📸 Taking picture of your homework...');
+        
+        // Start new interaction - reset processing status update count
+        const newInteractionId = Date.now().toString();
+        setCurrentInteractionId(newInteractionId);
+        setProcessingStatusUpdateCount(1); // First update for this interaction
+        
         setProcessingStatus(message.data?.message || 'Analyzing your homework...');
         
         // Set image URL when a picture is taken (using current session)
@@ -203,7 +216,10 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         setCurrentAssistantMessage('');
         setIsAnalyzingImage(false);
         setProcessingStatus(''); // Clear any processing status
-        setCurrentMathJax(''); // Clear current math content to prepare for new response
+        // Keep currentMathJax and visualization - don't clear until new content arrives
+        // Reset interaction tracking
+        setCurrentInteractionId(null);
+        setProcessingStatusUpdateCount(0);
         break;
         
       case 'error':
@@ -221,6 +237,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         break;
         
       case 'image_received':
+        setProcessingStatusUpdateCount(prev => prev + 1);
         setProcessingStatus('Image received, analyzing...');
         // Set image URL when image is received and stored in session
         const imageUrl = `http://localhost:8000/sessions/${sessionId}/image`;
@@ -229,6 +246,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         break;
         
       case 'image_analyzed':
+        setProcessingStatusUpdateCount(prev => prev + 1);
         setProcessingStatus('Analysis complete!');
         const analysis = message.data?.analysis;
         
@@ -261,6 +279,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         
         // Apply the parsing results
         if (parseResult.processingStatus) {
+          setProcessingStatusUpdateCount(prev => prev + 1);
           setProcessingStatus(parseResult.processingStatus);
         }
         
@@ -274,8 +293,14 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         // Handle visualization updates
         if (parseResult.shouldShowVisualization && parseResult.visualizationConfig) {
           console.log('🔌 Updating visualization from EventParser:', parseResult.visualizationConfig);
+          console.log('🔌 Setting showVisualization = true');
           setVisualizationConfig(parseResult.visualizationConfig);
           setShowVisualization(true);
+        } else {
+          console.log('🔌 No visualization update:', { 
+            shouldShow: parseResult.shouldShowVisualization, 
+            hasConfig: !!parseResult.visualizationConfig 
+          });
         }
 
         // Handle image URL updates
@@ -318,14 +343,14 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
       setCurrentUserMessage('');
       setCurrentAssistantMessage('');
       
-      // Clear previous content and interrupt audio when starting new recording
+      // Interrupt audio when starting new recording, but keep content visible
       if (currentMathJax || processingStatus) {
         // Immediately interrupt any playing audio
         audioClientRef.current.interruptAudio();
         
         setProcessingStatus('New question detected - interrupting previous response...');
         setTimeout(() => {
-          setCurrentMathJax('');
+          // Only clear processing status, keep MathJax until new content arrives
           setProcessingStatus('');
         }, 1000);
       }
@@ -407,6 +432,15 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
             />
           </div>
         )}
+
+        {/* ProcessingStatus - Top left after first MathJax renders */}
+        {hasRenderedFirstMathJax && processingStatus && (
+          <ProcessingStatus 
+            status={processingStatus} 
+            position="top-left"
+            shouldAnimate={processingStatusUpdateCount === 1}
+          />
+        )}
         
         {/* Central Start Button - only show when not recording and no conversation */}
         {!isRecording && conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && connectionStatus === 'connected' && (
@@ -426,8 +460,15 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
               {/* MathJax Display - Front and Center */}
               <MathJaxDisplay content={currentMathJax} />
               
-              {/* Processing Status - Below MathJax */}
-              <ProcessingStatus ref={processingStatusRef} status={processingStatus} />
+              {/* Processing Status - Center position for first question only */}
+              {!hasRenderedFirstMathJax && (
+                <ProcessingStatus 
+                  ref={processingStatusRef} 
+                  status={processingStatus} 
+                  position="center"
+                  shouldAnimate={true}
+                />
+              )}
               
             </div>
             
@@ -450,7 +491,6 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         <VisualizationPanel
           config={visualizationConfig}
           isVisible={showVisualization}
-          onClose={() => setShowVisualization(false)}
         />
         
         {/* Error State */}
