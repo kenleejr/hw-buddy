@@ -643,7 +643,7 @@ class HWBuddyLiveAgent:
                                 if transfer_agent == 'HintAgent':
                                     yield "I'm preparing a hint to guide you through this problem..."
                                 elif transfer_agent == 'VisualizerAgent':
-                                    yield "I'm preparing a visualization to help you understand this better..."
+                                    yield "I'm preparing a visualization to help you understand this better...this can take a while the first time."
         
                         
                         # Check if this is a final response but don't return yet - collect it
