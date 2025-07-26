@@ -18,8 +18,8 @@ import 'firebase_options.dart';
 import 'camera_service.dart';
 
 // Backend configuration
-//const String BACKEND_URL = 'https://d6ecd6c83b01.ngrok-free.app';
-const String BACKEND_URL = 'https://d6ecd6c83b01.ngrok-free.app';
+//const String BACKEND_URL = 'https://7d25d27c1e0e.ngrok-free.app';
+const String BACKEND_URL = 'https://7d25d27c1e0e.ngrok-free.app';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   

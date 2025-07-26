@@ -120,6 +120,7 @@ You have complete freedom to create ANY type of visualization using arbitrary HT
 - Canvas for custom graphics and mathematical plots
 - SVG for scalable vector graphics
 - HTML5 elements with CSS animations
+- Tailwind for css classes, layout and spacing
 - Popular math libraries like D3.js, Plotly.js, Desmos API, or MathJax for rendering
 - Interactive elements like sliders, buttons, and input fields
 - Custom animations and transitions

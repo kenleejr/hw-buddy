@@ -4,12 +4,11 @@ import { useEffect, useState, forwardRef } from 'react';
 
 interface ProcessingStatusProps {
   status: string;
-  position?: 'center' | 'top-left';
   shouldAnimate?: boolean;
 }
 
 export const ProcessingStatus = forwardRef<HTMLDivElement, ProcessingStatusProps>(
-  ({ status, position = 'center', shouldAnimate = true }, ref) => {
+  ({ status, shouldAnimate = true }, ref) => {
     const [isVisible, setIsVisible] = useState(false);
     const [currentStatus, setCurrentStatus] = useState('');
 
@@ -41,24 +40,13 @@ export const ProcessingStatus = forwardRef<HTMLDivElement, ProcessingStatusProps
   if (!currentStatus) return null;
 
     return (
-      <div 
-        ref={ref} 
-        className={`
-          ${position === 'center' 
-            ? 'flex justify-center mt-12' 
-            : 'fixed top-40 left-4 z-40'
-          }
-        `}
-      >
+      <div ref={ref}>
         <div 
           className={`
             flex items-center justify-center rounded-2xl 
             bg-gradient-to-br from-blue-100 to-purple-100 
             border-2 border-blue-300 shadow-lg
-            ${position === 'center' 
-              ? 'px-12 py-8 min-w-[400px] min-h-[120px]' 
-              : 'px-4 py-3 min-w-[200px] max-w-[300px]'
-            }
+            px-6 py-4 w-full max-w-sm mx-auto
             ${shouldAnimate 
               ? 'transform transition-all duration-700 ease-in-out' 
               : 'transition-opacity duration-200'
@@ -71,10 +59,7 @@ export const ProcessingStatus = forwardRef<HTMLDivElement, ProcessingStatusProps
             }
           `}
         >
-          <div className={`
-            font-bold text-blue-900 animate-pulse text-center
-            ${position === 'center' ? 'text-2xl' : 'text-sm'}
-          `}>
+          <div className="font-bold text-blue-900 animate-pulse text-center text-sm">
             {currentStatus}
           </div>
         </div>

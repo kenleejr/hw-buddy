@@ -55,18 +55,13 @@ export default function VisualizationPanel({ config, isVisible }: VisualizationP
           script.remove();
           contentRef.current?.appendChild(newScript);
         } else {
-          // Inline script - wrap in an IIFE to avoid variable conflicts
+          // Inline script - execute in global context for library access
           const scriptContent = script.textContent || '';
-          const wrappedScript = `
-            (function() {
-              ${scriptContent}
-            })();
-          `;
           
           try {
-            // Use Function constructor to execute in isolated scope
-            const executeScript = new Function(wrappedScript);
-            executeScript();
+            // Use eval in global context to maintain access to libraries like Desmos
+            const globalEval = eval;
+            globalEval(scriptContent);
           } catch (error) {
             console.error('Error executing visualization script:', error);
           }
@@ -109,7 +104,7 @@ export default function VisualizationPanel({ config, isVisible }: VisualizationP
       {/* Minimized Tab - Shows when minimized */}
       {isMinimized && (
         <div 
-          className="fixed right-0 top-20 bg-white shadow-lg border border-gray-200 rounded-l-lg z-30 cursor-pointer hover:bg-gray-50 transition-colors"
+          className="absolute right-0 top-4 bg-white shadow-lg border border-gray-200 rounded-l-lg z-30 cursor-pointer hover:bg-gray-50 transition-colors"
           onClick={handleMaximize}
         >
           <div className="flex items-center p-3 space-x-2">
@@ -123,10 +118,10 @@ export default function VisualizationPanel({ config, isVisible }: VisualizationP
       {/* Full Panel - Shows when visible and not minimized */}
       {isVisible && !isMinimized && (
         <div 
-          className={`fixed right-0 top-16 h-[calc(100vh-4rem)] bg-white shadow-2xl border-l border-gray-200 transition-all duration-300 ease-in-out z-30 ${
+          className={`absolute right-0 top-0 h-full bg-white shadow-2xl border-l border-gray-200 transition-all duration-300 ease-in-out z-30 ${
             isAnimating ? 'animate-pulse' : ''
           } ${
-            isExpanded ? 'w-[70%] min-w-[900px]' : 'w-[45%] min-w-[600px]'
+            isExpanded ? 'w-[70%] min-w-[500px]' : 'w-[45%] min-w-[400px]'
           }`}
         >
           {/* Header */}

@@ -399,93 +399,110 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
 
   return (
     <div className="min-h-screen bg-hw-light">
-      {/* Navigation with Status */}
+      {/* Top Navigation - Consistent with home page */}
       <Navigation 
         currentPage="hw-buddy"
-        sessionId={sessionId}
-        status={status}
-        error={error}
-        audioLevel={audioLevel}
-        isRecording={isRecording}
-        onEndSession={handleEndSession}
-        onStopRecording={stopRecording}
       />
       
-      <div className="container mx-auto px-4 py-8">
-        {/* Connection Status Indicator */}
-        <div className="fixed top-20 right-4 z-50">
-          <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-            connectionStatus === 'connected' 
-              ? 'bg-green-100 text-green-800 border border-green-200' 
-              : 'bg-red-100 text-red-800 border border-red-200'
-          }`}>
-            {connectionStatus === 'connected' ? '🔗 Connected' : '❌ Disconnected'}
+      {/* Main Layout with Agent Column */}
+      <div className="flex" style={{ height: 'calc(100vh - 4rem)' }}>
+        {/* Left Agent Column */}
+        <div className="w-64 bg-white border-r-2 border-gray-200 flex flex-col relative">
+          {/* Agent Activity - Center */}
+          <div className="flex-1 flex flex-col justify-center items-center space-y-6 px-4">
+            {/* See What I See Button */}
+            {lastImageUrl && (
+              <SeeWhatISeeButton 
+                imageUrl={lastImageUrl}
+                isAnalyzing={isAnalyzingImage}
+              />
+            )}
+
+            {/* ProcessingStatus */}
+            {processingStatus && (
+              <ProcessingStatus 
+                ref={processingStatusRef}
+                status={processingStatus} 
+                shouldAnimate={processingStatusUpdateCount === 1}
+              />
+            )}
+          </div>
+
+          {/* Bottom Section - Session Controls */}
+          <div className="p-3 border-t border-gray-200">
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500 text-center font-medium">Session Status</div>
+              
+              {/* Connection Status */}
+              <div className="flex items-center justify-center">
+                <div className={`px-3 py-1 rounded-lg text-xs font-medium ${
+                  connectionStatus === 'connected' 
+                    ? 'bg-green-100 text-green-800 border border-green-200' 
+                    : 'bg-red-100 text-red-800 border border-red-200'
+                }`}>
+                  {connectionStatus === 'connected' ? '🔗 Connected' : '❌ Disconnected'}
+                </div>
+              </div>
+
+              {/* Recording Status */}
+              <div className="flex items-center justify-center">
+                <div className={`px-3 py-1 rounded-lg text-xs font-medium ${
+                  isRecording 
+                    ? 'bg-red-100 text-red-800 border border-red-200' 
+                    : 'bg-gray-100 text-gray-600 border border-gray-200'
+                }`}>
+                  {isRecording ? '🔴 Recording' : '⏹️ Stopped'}
+                </div>
+              </div>
+
+              {/* Session Info */}
+              <div className="flex items-center justify-center">
+                <div className="px-3 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                  📺 {sessionId?.slice(-6) || 'Active'}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* See What I See Button - Top left corner */}
-        {lastImageUrl && (
-          <div className="fixed top-20 left-4 z-50">
-            <SeeWhatISeeButton 
-              imageUrl={lastImageUrl}
-              isAnalyzing={isAnalyzingImage}
+        {/* Main Content Area */}
+        <div className="flex-1 relative overflow-hidden">
+        
+        <div className="container mx-auto px-4 py-8">
+          {/* Central Start Button - only show when not recording and no conversation */}
+          {!isRecording && conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && connectionStatus === 'connected' && (
+            <CentralStartButton
+              isRecording={false}
+              isDisabled={!!error || connectionStatus !== 'connected'}
+              onStartRecording={startRecording}
+              onStopRecording={stopRecording}
             />
-          </div>
-        )}
-
-        {/* ProcessingStatus - Top left after first MathJax renders */}
-        {hasRenderedFirstMathJax && processingStatus && (
-          <ProcessingStatus 
-            status={processingStatus} 
-            position="top-left"
-            shouldAnimate={processingStatusUpdateCount === 1}
-          />
-        )}
-        
-        {/* Central Start Button - only show when not recording and no conversation */}
-        {!isRecording && conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && connectionStatus === 'connected' && (
-          <CentralStartButton
-            isRecording={false}
-            isDisabled={!!error || connectionStatus !== 'connected'}
-            onStartRecording={startRecording}
-            onStopRecording={stopRecording}
-          />
-        )}
-        
-        {/* Main Content - Show when there's activity */}
-        {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording || currentMathJax || showVisualization) && (
-          <div className="space-y-8">
-            {/* Content Container with responsive layout */}
-            <div className={`transition-all duration-300 ${showVisualization ? 'pr-[45%]' : ''}`}>
-              {/* MathJax Display - Front and Center */}
-              <MathJaxDisplay content={currentMathJax} />
+          )}
+          
+          {/* Main Content - Show when there's activity */}
+          {(conversation.length > 0 || currentUserMessage || currentAssistantMessage || isRecording || currentMathJax || showVisualization) && (
+            <div className="space-y-8">
+              {/* Content Container with responsive layout */}
+              <div className={`transition-all duration-300 ${showVisualization ? 'mr-[45%]' : ''}`}>
+                {/* MathJax Display - Front and Center */}
+                <MathJaxDisplay content={currentMathJax} />
+              </div>
               
-              {/* Processing Status - Center position for first question only */}
-              {!hasRenderedFirstMathJax && (
-                <ProcessingStatus 
-                  ref={processingStatusRef} 
-                  status={processingStatus} 
-                  position="center"
-                  shouldAnimate={true}
+              {/* Chat Panel - Hidden by default, can be toggled if needed */}
+              <div className="hidden">
+                <ChatPanel
+                  conversation={conversation}
+                  currentUserMessage={currentUserMessage}
+                  currentAssistantMessage={currentAssistantMessage}
+                  lastImageUrl={lastImageUrl}
+                  isAnalyzingImage={isAnalyzingImage}
+                  currentMathJax={currentMathJax}
+                  processingStatus={processingStatus}
                 />
-              )}
-              
+              </div>
             </div>
-            
-            {/* Chat Panel - Hidden by default, can be toggled if needed */}
-            <div className="hidden">
-              <ChatPanel
-                conversation={conversation}
-                currentUserMessage={currentUserMessage}
-                currentAssistantMessage={currentAssistantMessage}
-                lastImageUrl={lastImageUrl}
-                isAnalyzingImage={isAnalyzingImage}
-                currentMathJax={currentMathJax}
-                processingStatus={processingStatus}
-              />
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Visualization Panel - Slides in from the right */}
         <VisualizationPanel
@@ -495,7 +512,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         
         {/* Error State */}
         {error && (
-          <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto">
+          <div className="fixed bottom-20 left-4 right-4 max-w-md mx-auto">
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex">
                 <div className="flex-shrink-0">
@@ -527,7 +544,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
         
         {/* Disconnected State */}
         {!error && connectionStatus === 'disconnected' && (
-          <div className="fixed bottom-4 left-4 right-4 max-w-md mx-auto">
+          <div className="fixed bottom-20 left-4 right-4 max-w-md mx-auto">
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex">
                 <div className="flex-shrink-0">
@@ -545,6 +562,7 @@ export function BackendAudioSession({ sessionId, onEndSession }: BackendAudioSes
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

@@ -699,7 +699,7 @@ class HWBuddyLiveAgent:
                     
                     yield final_response
                 else:
-                    yield "I've analyzed your homework and provided guidance above."
+                    yield "Looks like there was an issue rendering the viz. I can try again if you'd like."
                 
                 logger.info(f"Expert help completed for session {current_session_id}")
                 
