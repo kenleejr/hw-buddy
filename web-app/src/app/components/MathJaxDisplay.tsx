@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import { ActionCards } from './ActionCards';
 
 interface MathJaxDisplayProps {
   content: string;
@@ -60,7 +59,46 @@ export function MathJaxDisplay({ content, onActionClick }: MathJaxDisplayProps) 
   };
 
   if (!content) {
-    return <ActionCards onCardClick={onActionClick} />;
+    const cards = [
+      {
+        id: 'hint',
+        title: 'Ask me for a hint!'
+      },
+      {
+        id: 'visualization',
+        title: 'Ask me for a visualization!'
+      },
+      {
+        id: 'search',
+        title: 'Search the internet or my textbook!'
+      }
+    ];
+
+    return (
+      <div className="flex justify-center items-center min-h-[200px] p-4">
+        <div className="max-w-4xl w-full">
+          <p className="text-center text-lg text-gray-700 mb-6">
+            Tell me about the problem you are working on and how I can help
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {cards.map((card) => (
+              <div
+                key={card.id}
+                onClick={() => onActionClick?.(card.id)}
+                className="
+                  bg-white rounded-2xl shadow-lg 
+                  p-6 border border-gray-100
+                "
+              >
+                <h3 className="font-bold text-lg mb-2 leading-tight text-gray-800 text-center">
+                  {card.title}
+                </h3>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

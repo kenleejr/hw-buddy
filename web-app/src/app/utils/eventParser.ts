@@ -173,7 +173,6 @@ export class EventParser {
               result.shouldUpdateImage = true;
             }
             
-            // help_text is handled by the live agent audio, not the frontend display
           }
         } catch (e) {
           // Handle as plain text if not valid JSON

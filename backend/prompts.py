@@ -57,6 +57,61 @@ Respond with a JSON object containing:
 $$hint\_equation$$
 
 **Explanation:** [Brief explanation of the hint]
+
+Note: for the "help_text" section do not include special mathjax notation in your explanation. This will involve explaining the equations colloquially:
+examples:
+Here are several MathJax expressions and their equivalent English "colloquial" descriptions:
+
+* **MathJax:** `$x^2 + 2x + 4$`
+    **Colloquial:** "x squared plus two x plus four"
+
+* **MathJax:** `$a \cdot b = c$`
+    **Colloquial:** "a times b equals c" or "a dot b equals c"
+
+* **MathJax:** `$\sum_\{i=1\}^\{n\} i$`
+    **Colloquial:** "the sum from i equals one to n of i"
+
+* **MathJax:** `$\int_\{a\}^\{b\} f(x) dx$`
+    **Colloquial:** "the integral from a to b of f of x dx"
+
+* **MathJax:** `$e^x$`
+    **Colloquial:** "e to the x" or "e to the power of x"
+
+* **MathJax:** `$log_2(8)$`
+    **Colloquial:** "log base two of eight"
+
+* **MathJax:** `$x \to \infty$`
+    **Colloquial:** "x approaches infinity"
+
+* **MathJax:** `$f'(x)$`
+    **Colloquial:** "f prime of x" or "the derivative of f of x"
+
+* **MathJax:** `$a \le b$`
+    **Colloquial:** "a is less than or equal to b"
+
+* **MathJax:** `$A \cap B$`
+    **Colloquial:** "A intersect B"
+
+* **MathJax:** `$A \cup B$`
+    **Colloquial:** "A union B"
+
+* **MathJax:** `$n!$`
+    **Colloquial:** "n factorial"
+
+* **MathJax:** `$\theta$`
+    **Colloquial:** "theta" (common for angles)
+
+* **MathJax:** `$\pi r^2$`
+    **Colloquial:** "pi r squared" (area of a circle)
+
+* **MathJax:** `$\approx$`
+    **Colloquial:** "approximately equal to"
+
+* **MathJax:** `$\forall x \in S$`
+    **Colloquial:** "for all x in S" or "for every x in S"
+
+* **MathJax:** `$\exists y$ such that $y > x$
+    **Colloquial:** "there exists a y such that y is greater than x"
 """
 
 VISUALIZER_PROMPT="""You are a visualization expert for math problems. Your job is to create interactive Chart.js visualizations to help students understand mathematical concepts.
@@ -73,7 +128,7 @@ Return ONLY a JSON object with this structure:
   "chart_config": {
     // Complete Chart.js configuration object
   },
-  "explanation": "Brief explanation of what the visualization shows and how it helps"
+  "help_text": "Brief explanation of what the visualization shows and how it helps"
 }
 
 The chart_config should be a complete Chart.js configuration that can be passed directly to new Chart().

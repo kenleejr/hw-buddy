@@ -691,7 +691,7 @@ class HWBuddyLiveAgent:
                         else:
                             # Fallback to cleaned response if no help_text found
                             final_response = cleaned_response
-                            logger.info("🔍 No help_text found, using cleaned response")
+                            logger.info("🔍 No help_text found, using default help_text")
                     except json.JSONDecodeError:
                         # Fallback to cleaned response if not valid JSON
                         final_response = cleaned_response
