@@ -2,6 +2,8 @@
 
 An intelligent tutoring system that provides real-time, personalized homework assistance using AI vision and voice interaction, mimicking the experience of having a human tutor by your side.
 
+[Demo Link](https://www.youtube.com/watch?v=BoI0YNxCYCA&ab_channel=KennethLee)
+
 ## 🎯 Overview
 
 HW Buddy creates a seamless learning environment where students can study naturally while receiving AI-powered guidance. The system uses computer vision to analyze homework in real-time and provides spoken feedback, keeping students focused on their work without context switching.
